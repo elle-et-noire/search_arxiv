@@ -1,9 +1,12 @@
 import requests
 import feedparser
+import pdf_to_text
 
 def search_arxiv_by_title(title):
     base_url = "https://export.arxiv.org/api/query"
-    query = f'ti:{title} AND au:ryu AND au:chang AND au:you AND au:wen'
+    # query = f'ti:{title} AND au:ryu AND au:chang AND au:you AND au:wen'
+    # query = "au:ryu AND au:chang AND au:you AND au:wen AND cat:physics"
+    query = "au:pylyavskyy AND au:skopenkov"
     params = {
         "search_query": query,
         "start": 0,
