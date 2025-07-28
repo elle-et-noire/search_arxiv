@@ -1,12 +1,14 @@
 import requests
 import feedparser
 import pdf_to_text
+import get_ti_au
+import sys
+from rapidfuzz import fuzz
 
-def search_arxiv_by_title(title):
+def search_arxiv_by_authors(authors):
+    split_authors = authors.split(", ")
     base_url = "https://export.arxiv.org/api/query"
-    # query = f'ti:{title} AND au:ryu AND au:chang AND au:you AND au:wen'
-    # query = "au:ryu AND au:chang AND au:you AND au:wen AND cat:physics"
-    query = "au:pylyavskyy AND au:skopenkov"
+    query = " AND ".join([f'au:{author.split(" ")[-1]}' for author in split_authors])
     params = {
         "search_query": query,
         "start": 0,
@@ -23,6 +25,10 @@ def search_arxiv_by_title(title):
         print("PDF URL:", entry.id.replace('/abs/', '/pdf/') + ".pdf")
         print("---")
 
-# search_arxiv_by_title("Tensor network simulations for non-orientable surfaces")
-search_arxiv_by_title("Entanglement spectrum and entropy in topological non-Hermitian systems")
-
+if __name__ == "__main__":
+    text = pdf_to_text.pdf_to_text(sys.argv[1])
+    ref = pdf_to_text.find_ref(text, int(sys.argv[2]))
+    authors, title = get_ti_au.extract_author_and_title_universal(ref)
+    print("Authors:", authors)
+    print("Title:", title)
+    search_arxiv_by_authors(authors)

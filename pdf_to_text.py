@@ -26,6 +26,7 @@ def find_ref(text, num):
 
   return ref_block
 
-# text = pdf_to_text("sample.pdf")
-# ref = find_ref(text, int(sys.argv[1]))
-# print(ref)
+if __name__ == "__main__":
+    text = pdf_to_text("sample.pdf")
+    ref = find_ref(text, int(sys.argv[1]))
+    print(ref)
