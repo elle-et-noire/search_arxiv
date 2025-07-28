@@ -7,6 +7,7 @@ Extract references from PDF and search for similar papers on arXiv based on auth
 import re
 import sys
 import os
+import subprocess
 from typing import Optional, Tuple, List, Any
 from dataclasses import dataclass
 
@@ -102,7 +103,11 @@ class ArxivSearcher:
 
     def _build_author_query(self, authors: str) -> str:
         """Build query from author names"""
-        author_list = authors.split(", ")
+        # Split by both ", " and " and "
+        author_list = re.split(r",\s+|\s+and\s+", authors)
+        # Remove empty strings and strip whitespace
+        author_list = [author.strip()
+                       for author in author_list if author.strip()]
         # Build query using only surnames
         query_parts = [f'au:{author.split(" ")[-1]}' for author in author_list]
         return " AND ".join(query_parts)
@@ -169,8 +174,55 @@ class ResultDisplayer:
     """Class responsible for displaying results"""
 
     @staticmethod
+    def download_pdf_and_view(url: str, filename: str) -> bool:
+        """Download PDF from URL and open with mupdf"""
+        try:
+            print(f"Downloading PDF: {filename}")
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+
+            with open(filename, 'wb') as f:
+                f.write(response.content)
+
+            print(f"✓ Downloaded: {filename}")
+
+            # Check if mupdf is available
+            try:
+                subprocess.run(['which', 'mupdf'], check=True,
+                               capture_output=True)
+                print(f"Opening PDF with mupdf: {filename}")
+                # Open mupdf in background and detach from parent process
+                subprocess.Popen(['mupdf', filename],
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+                print("✓ PDF opened with mupdf")
+                return True
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print("⚠ mupdf not found. Trying alternative PDF viewers...")
+                # Try alternative PDF viewers
+                for viewer in ['evince', 'okular', 'xpdf', 'zathura']:
+                    try:
+                        subprocess.run(['which', viewer],
+                                       check=True, capture_output=True)
+                        print(f"Opening PDF with {viewer}: {filename}")
+                        subprocess.Popen([viewer, filename],
+                                         stdout=subprocess.DEVNULL,
+                                         stderr=subprocess.DEVNULL)
+                        print(f"✓ PDF opened with {viewer}")
+                        return True
+                    except (subprocess.CalledProcessError, FileNotFoundError):
+                        continue
+
+                print("⚠ No PDF viewer found. PDF downloaded but not opened.")
+                return True
+
+        except Exception as e:
+            print(f"✗ Failed to download PDF: {e}")
+            return False
+
+    @staticmethod
     def download_pdf(url: str, filename: str) -> bool:
-        """Download PDF from URL"""
+        """Download PDF from URL (legacy method)"""
         try:
             print(f"Downloading PDF: {filename}")
             response = requests.get(url, timeout=30)
@@ -263,10 +315,12 @@ class ResultDisplayer:
                         filename = f"{arxiv_id}_{safe_title}.pdf"
 
                         print(f"\nDownloading result #{result_num}...")
-                        success = ResultDisplayer.download_pdf(
+                        success = ResultDisplayer.download_pdf_and_view(
                             entry.pdf_url, filename)
                         if success:
                             print(f"✓ Successfully saved as: {filename}")
+                            print("Exiting interactive mode...")
+                            break  # Exit the interactive loop
                         else:
                             print("✗ Download failed.")
                     else:
