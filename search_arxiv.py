@@ -5,10 +5,12 @@ import get_ti_au
 import sys
 from rapidfuzz import fuzz
 
-def search_arxiv_by_authors(authors):
+
+def search_arxiv_by_authors(authors, title):
     split_authors = authors.split(", ")
     base_url = "https://export.arxiv.org/api/query"
-    query = " AND ".join([f'au:{author.split(" ")[-1]}' for author in split_authors])
+    query = " AND ".join(
+        [f'au:{author.split(" ")[-1]}' for author in split_authors])
     params = {
         "search_query": query,
         "start": 0,
@@ -18,12 +20,20 @@ def search_arxiv_by_authors(authors):
     print(response.url)
     feed = feedparser.parse(response.text)
     print(len(feed.entries))
-    for entry in feed.entries:
+
+    # titleとentry.titleのfuzz.ratioでソート
+    sorted_entries = sorted(feed.entries, key=lambda entry: fuzz.ratio(
+        title, entry.title), reverse=True)
+
+    for entry in sorted_entries:
+        similarity = fuzz.ratio(title, entry.title)
+        print(f"Similarity: {similarity:.1f}")
         print("Title:", entry.title)
         print("Authors:", ", ".join(author.name for author in entry.authors))
         print("arXiv URL:", entry.id)
         print("PDF URL:", entry.id.replace('/abs/', '/pdf/') + ".pdf")
         print("---")
+
 
 if __name__ == "__main__":
     text = pdf_to_text.pdf_to_text(sys.argv[1])
@@ -31,4 +41,4 @@ if __name__ == "__main__":
     authors, title = get_ti_au.extract_author_and_title_universal(ref)
     print("Authors:", authors)
     print("Title:", title)
-    search_arxiv_by_authors(authors)
+    search_arxiv_by_authors(authors, title)
