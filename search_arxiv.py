@@ -65,7 +65,6 @@ class CitationParser:
 
         for i, line in enumerate(lines):
             if line.startswith(f"[{ref_number}]"):
-                print(f"Found reference: {line}")
                 ref_block += re.sub(r"([.,])$", r"\1 ", line.rstrip("-"))
 
                 # Continue reading until the next reference
@@ -77,6 +76,7 @@ class CitationParser:
                     j += 1
                 break
 
+        print(f"Ref: {ref_block.strip()}")
         return ref_block.strip()
 
     @staticmethod
@@ -157,8 +157,6 @@ class ArxivSearcher:
 
         query = self._build_author_query(authors)
         feed = self._make_request(query)
-
-        print(f"Found {len(feed.entries)} entries\n")
 
         # Parse entries and sort by similarity
         arxiv_entries = [
@@ -251,12 +249,12 @@ class ResultDisplayer:
     @staticmethod
     def display_single_result(entry: ArxivEntry, index: int) -> None:
         """Display a single search result"""
-        print(f"\n[{index}] Similarity: {entry.similarity_score:.1f}")
+        print(f"\n[{index}] (Similarity: {entry.similarity_score:.1f})")
+        print("="*60)
         print(f"Title: {entry.title}")
         print(f"Authors: {', '.join(entry.authors)}")
         print(f"arXiv URL: {entry.arxiv_url}")
-        print(f"PDF URL: {entry.pdf_url}")
-        print("---")
+        print("="*60)
 
     @staticmethod
     def display_results_interactive(entries: List[ArxivEntry]) -> None:
@@ -266,26 +264,11 @@ class ResultDisplayer:
             return
 
         # Display the first result (highest similarity)
-        print("\n" + "="*60)
-        print("SEARCH RESULTS")
-        print("="*60)
-        print(f"Found {len(entries)} papers, showing top result first:")
-
         ResultDisplayer.display_single_result(entries[0], 1)
 
         displayed_count = 1
 
         while True:
-            print(f"\n" + "-"*40)
-            print("COMMANDS:")
-            print("  m - Show more results")
-            print("  1 - Download PDF of result #1")
-            if displayed_count > 1:
-                print(
-                    f"  2-{displayed_count} - Download PDF of specific result")
-            print("  q - Quit")
-            print("-"*40)
-
             try:
                 user_input = input("Enter command: ").strip().lower()
 
@@ -374,9 +357,6 @@ def main() -> None:
         if not authors or not title:
             print("Failed to extract author names or title")
             sys.exit(1)
-
-        print(f"Authors: {authors}")
-        print(f"Title: {title}")
 
         # arXiv search
         searcher = ArxivSearcher()
