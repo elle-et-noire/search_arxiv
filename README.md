@@ -1,17 +1,6 @@
 # ArXiv Paper Search Tool
 
-A powerful Python tool that extracts references from PDF files and searches for similar papers on arXiv based on author information and title similarity.
-
-## Features
-
-- 📄 **PDF Text Extraction**: Extract text content from PDF files using PyMuPDF
-- 🔍 **Reference Parsing**: Automatically locate and parse numbered references from academic papers
-- 🎯 **Author & Title Extraction**: Extract author names and paper titles from citation strings
-- 🔗 **ArXiv API Integration**: Search arXiv database using author surnames
-- 📊 **Similarity Ranking**: Rank search results by title similarity using fuzzy string matching
-- 💻 **Interactive Interface**: User-friendly command-line interface with progressive result display
-- 📱 **PDF Download & Viewing**: Automatically download and open PDFs with mupdf or alternative viewers
-- 🔄 **Flexible Author Parsing**: Handle both comma-separated and "and"-separated author lists
+A cli python tool that extracts references from PDF files and searches for similar papers on arXiv based on author information and title similarity.
 
 ## Installation
 
@@ -40,17 +29,7 @@ Install a PDF viewer (recommended: mupdf):
 
 **Ubuntu/Debian:**
 ```bash
-sudo apt-get install mupdf
-```
-
-**Fedora/RHEL:**
-```bash
-sudo dnf install mupdf
-```
-
-**macOS:**
-```bash
-brew install mupdf
+sudo apt install mupdf
 ```
 
 ## Usage
@@ -129,8 +108,8 @@ For example: `2301.12345_Deep_Learning_for_Natural_Language.pdf`
 The tool can parse various citation formats including:
 
 ```
+Smith, J., "Paper Title", Conference Proceedings, 2023.
 Smith, J. and Doe, A., "Paper Title", Journal Name, 2023.
-Smith, J., Doe, A., "Paper Title", Conference Proceedings, 2023.
 Smith, J., Doe, A. and Wilson, B., "Paper Title", arXiv preprint, 2023.
 ```
 
@@ -143,33 +122,12 @@ The tool includes comprehensive error handling for:
 - Citation parsing failures
 - PDF viewer availability
 
-## Dependencies
-
-### Python Packages
-- `PyMuPDF` (fitz) - PDF text extraction
-- `requests` - HTTP requests to arXiv API
-- `feedparser` - Parsing arXiv API responses
-- `rapidfuzz` - Fuzzy string matching for similarity scoring
-
-### System Requirements
-- Python 3.7 or higher
-- Internet connection for arXiv API access
-- PDF viewer for automatic document opening
-
 ## Limitations
 
 - Only works with numbered references in `[N]` format
 - Requires internet connection for arXiv searches
 - Citation parsing may fail with non-standard formats
 - Limited to papers available on arXiv
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
 
 ## License
 
@@ -184,3 +142,4 @@ Created by [elle-et-noire](https://github.com/elle-et-noire)
 - arXiv for providing the open access repository and API
 - PyMuPDF team for the excellent PDF processing library
 - rapidfuzz developers for fast string matching algorithms
+- GitHub Copilot for AI-assisted development and code optimization
