@@ -6,7 +6,8 @@ Extract references from PDF and search for similar papers on arXiv based on auth
 
 import re
 import sys
-from typing import Optional, Tuple, List, Dict, Any
+import os
+from typing import Optional, Tuple, List, Any
 from dataclasses import dataclass
 
 import fitz
@@ -152,7 +153,7 @@ class ArxivSearcher:
         query = self._build_author_query(authors)
         feed = self._make_request(query)
 
-        print(f"Found {len(feed.entries)} entries")
+        print(f"Found {len(feed.entries)} entries\n")
 
         # Parse entries and sort by similarity
         arxiv_entries = [
@@ -168,15 +169,122 @@ class ResultDisplayer:
     """Class responsible for displaying results"""
 
     @staticmethod
-    def display_results(entries: List[ArxivEntry]) -> None:
-        """Display search results"""
-        for entry in entries:
-            print(f"Similarity: {entry.similarity_score:.1f}")
-            print(f"Title: {entry.title}")
-            print(f"Authors: {', '.join(entry.authors)}")
-            print(f"arXiv URL: {entry.arxiv_url}")
-            print(f"PDF URL: {entry.pdf_url}")
-            print("---")
+    def download_pdf(url: str, filename: str) -> bool:
+        """Download PDF from URL"""
+        try:
+            print(f"Downloading PDF: {filename}")
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+
+            with open(filename, 'wb') as f:
+                f.write(response.content)
+
+            print(f"Downloaded: {filename}")
+            return True
+        except Exception as e:
+            print(f"Failed to download PDF: {e}")
+            return False
+
+    @staticmethod
+    def display_single_result(entry: ArxivEntry, index: int) -> None:
+        """Display a single search result"""
+        print(f"\n[{index}] Similarity: {entry.similarity_score:.1f}")
+        print(f"Title: {entry.title}")
+        print(f"Authors: {', '.join(entry.authors)}")
+        print(f"arXiv URL: {entry.arxiv_url}")
+        print(f"PDF URL: {entry.pdf_url}")
+        print("---")
+
+    @staticmethod
+    def display_results_interactive(entries: List[ArxivEntry]) -> None:
+        """Display search results interactively"""
+        if not entries:
+            print("No results found.")
+            return
+
+        # Display the first result (highest similarity)
+        print("\n" + "="*60)
+        print("SEARCH RESULTS")
+        print("="*60)
+        print(f"Found {len(entries)} papers, showing top result first:")
+
+        ResultDisplayer.display_single_result(entries[0], 1)
+
+        displayed_count = 1
+
+        while True:
+            print(f"\n" + "-"*40)
+            print("COMMANDS:")
+            print("  m - Show more results")
+            print("  1 - Download PDF of result #1")
+            if displayed_count > 1:
+                print(
+                    f"  2-{displayed_count} - Download PDF of specific result")
+            print("  q - Quit")
+            print("-"*40)
+
+            try:
+                user_input = input("Enter command: ").strip().lower()
+
+                if user_input == 'q':
+                    print("Goodbye!")
+                    break
+
+                elif user_input == 'm':
+                    # Show more results
+                    if displayed_count < len(entries):
+                        remaining = min(5, len(entries) - displayed_count)
+                        print(f"\nShowing next {remaining} results:")
+                        print("-"*40)
+
+                        for i in range(displayed_count, displayed_count + remaining):
+                            ResultDisplayer.display_single_result(
+                                entries[i], i + 1)
+
+                        displayed_count += remaining
+
+                        if displayed_count >= len(entries):
+                            print(f"✓ All {len(entries)} results displayed.")
+                    else:
+                        print("ℹ All results already displayed.")
+
+                elif user_input.isdigit():
+                    result_num = int(user_input)
+
+                    if 1 <= result_num <= min(displayed_count, len(entries)):
+                        entry = entries[result_num - 1]
+                        # Generate safe filename from title and arXiv ID
+                        arxiv_id = entry.arxiv_url.split(
+                            '/')[-1] if entry.arxiv_url else "unknown"
+                        safe_title = "".join(
+                            c for c in entry.title if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                        safe_title = safe_title.replace(
+                            ' ', '_')[:40]  # Limit length
+                        filename = f"{arxiv_id}_{safe_title}.pdf"
+
+                        print(f"\nDownloading result #{result_num}...")
+                        success = ResultDisplayer.download_pdf(
+                            entry.pdf_url, filename)
+                        if success:
+                            print(f"✓ Successfully saved as: {filename}")
+                        else:
+                            print("✗ Download failed.")
+                    else:
+                        print(
+                            f"✗ Invalid number. Please enter 1-{min(displayed_count, len(entries))}.")
+
+                else:
+                    print("✗ Invalid command. Please enter 'm', 'q', or a number.")
+
+            except KeyboardInterrupt:
+                print("\n\nInterrupted by user. Exiting...")
+                break
+            except EOFError:
+                print("\n\nExiting...")
+                break
+            except Exception as e:
+                print(f"✗ Error: {e}")
+                continue
 
 
 def main() -> None:
@@ -211,7 +319,7 @@ def main() -> None:
 
         # Display results
         displayer = ResultDisplayer()
-        displayer.display_results(results)
+        displayer.display_results_interactive(results)
 
     except ValueError as e:
         print(f"Input error: {e}")
