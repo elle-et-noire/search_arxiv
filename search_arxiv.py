@@ -174,9 +174,47 @@ class ResultDisplayer:
     """Class responsible for displaying results"""
 
     @staticmethod
-    def download_pdf_and_view(url: str, filename: str) -> bool:
-        """Download PDF from URL and open with mupdf"""
+    def open_pdf_with_viewer(filename: str) -> bool:
+        """Open PDF with available viewer"""
+        # Check if mupdf is available
         try:
+            subprocess.run(['which', 'mupdf'], check=True, capture_output=True)
+            print(f"Opening PDF with mupdf: {filename}")
+            subprocess.Popen(['mupdf', filename],
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+            print("✓ PDF opened with mupdf")
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            print("⚠ mupdf not found. Trying alternative PDF viewers...")
+            # Try alternative PDF viewers
+            for viewer in ['evince', 'okular', 'xpdf', 'zathura']:
+                try:
+                    subprocess.run(['which', viewer],
+                                   check=True, capture_output=True)
+                    print(f"Opening PDF with {viewer}: {filename}")
+                    subprocess.Popen([viewer, filename],
+                                     stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
+                    print(f"✓ PDF opened with {viewer}")
+                    return True
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    continue
+
+            print("⚠ No PDF viewer found. PDF file available but not opened.")
+            return False
+
+    @staticmethod
+    def download_pdf_and_view(url: str, filename: str) -> bool:
+        """Download PDF from URL and open with mupdf, or open existing file"""
+        try:
+            # Check if file already exists
+            if os.path.exists(filename):
+                print(f"✓ File already exists: {filename}")
+                print("Opening existing PDF file...")
+                return ResultDisplayer.open_pdf_with_viewer(filename)
+
+            # Download the file if it doesn't exist
             print(f"Downloading PDF: {filename}")
             response = requests.get(url, timeout=30)
             response.raise_for_status()
@@ -186,35 +224,8 @@ class ResultDisplayer:
 
             print(f"✓ Downloaded: {filename}")
 
-            # Check if mupdf is available
-            try:
-                subprocess.run(['which', 'mupdf'], check=True,
-                               capture_output=True)
-                print(f"Opening PDF with mupdf: {filename}")
-                # Open mupdf in background and detach from parent process
-                subprocess.Popen(['mupdf', filename],
-                                 stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL)
-                print("✓ PDF opened with mupdf")
-                return True
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                print("⚠ mupdf not found. Trying alternative PDF viewers...")
-                # Try alternative PDF viewers
-                for viewer in ['evince', 'okular', 'xpdf', 'zathura']:
-                    try:
-                        subprocess.run(['which', viewer],
-                                       check=True, capture_output=True)
-                        print(f"Opening PDF with {viewer}: {filename}")
-                        subprocess.Popen([viewer, filename],
-                                         stdout=subprocess.DEVNULL,
-                                         stderr=subprocess.DEVNULL)
-                        print(f"✓ PDF opened with {viewer}")
-                        return True
-                    except (subprocess.CalledProcessError, FileNotFoundError):
-                        continue
-
-                print("⚠ No PDF viewer found. PDF downloaded but not opened.")
-                return True
+            # Open the downloaded file
+            return ResultDisplayer.open_pdf_with_viewer(filename)
 
         except Exception as e:
             print(f"✗ Failed to download PDF: {e}")
