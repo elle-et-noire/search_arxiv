@@ -19,11 +19,11 @@ from rapidfuzz import fuzz
 
 # Constants
 ARXIV_API_BASE_URL = "https://export.arxiv.org/api/query"
-DEFAULT_MAX_RESULTS = 10
+DEFAULT_MAX_RESULTS = 100
 CITATION_PATTERN = re.compile(
     r"^(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
     r"(?P<title>.*),\s"
-    r"(?P<source>.*)$"
+    r"(?P<source>[^,]*,[^,]*)$"
 )
 
 
@@ -108,8 +108,19 @@ class ArxivSearcher:
         # Remove empty strings and strip whitespace
         author_list = [author.strip()
                        for author in author_list if author.strip()]
-        # Build query using only surnames
-        query_parts = [f'au:{author.split(" ")[-1]}' for author in author_list]
+        # Build query using only surnames, excluding those with hyphens
+        query_parts = []
+        for author in author_list:
+            surname = author.split(" ")[-1]
+            # Skip surnames that contain hyphens
+            if '-' not in surname:
+                query_parts.append(f'au:{surname}')
+
+        if not query_parts:
+            # If all surnames contain hyphens, fallback to using them anyway
+            query_parts = [
+                f'au:{author.split(" ")[-1]}' for author in author_list]
+
         return " AND ".join(query_parts)
 
     def _make_request(self, query: str) -> feedparser.FeedParserDict:
@@ -125,6 +136,10 @@ class ArxivSearcher:
                 ARXIV_API_BASE_URL, params=params, timeout=10)
             response.raise_for_status()
             print(f"Request URL: {response.url}")
+
+            # Store the query URL for display
+            self.last_query_url = response.url
+
             return feedparser.parse(response.text)
         except requests.RequestException as e:
             raise RuntimeError(f"arXiv API request failed: {e}")
@@ -170,6 +185,12 @@ class ArxivSearcher:
 
 class ResultDisplayer:
     """Class responsible for displaying results"""
+
+    # Class variables to store parsing information
+    _last_reference: str = ""
+    _last_authors: str = ""
+    _last_title: str = ""
+    _last_query_url: str = ""
 
     @staticmethod
     def open_pdf_with_viewer(filename: str) -> bool:
@@ -270,11 +291,27 @@ class ResultDisplayer:
 
         while True:
             try:
-                user_input = input("Enter command: ").strip().lower()
+                user_input = input(
+                    "Enter command ([m]ore/DL [n]th ref/[p]arse info/[q]uit): ").strip().lower()
 
                 if user_input == 'q':
                     print("Goodbye!")
                     break
+
+                elif user_input == 'p':
+                    # Show parsing information
+                    print("\n" + "="*60)
+                    print("PARSING INFORMATION")
+                    print("="*60)
+                    print(
+                        f"Extracted Authors: {getattr(ResultDisplayer, '_last_authors', 'Not available')}")
+                    print(
+                        f"Extracted Title: {getattr(ResultDisplayer, '_last_title', 'Not available')}")
+                    print(
+                        f"Reference Text: {getattr(ResultDisplayer, '_last_reference', 'Not available')}")
+                    print(
+                        f"ArXiv Query URL: {getattr(ResultDisplayer, '_last_query_url', 'Not available')}")
+                    print("="*60)
 
                 elif user_input == 'm':
                     # Show more results
@@ -361,6 +398,13 @@ def main() -> None:
         # arXiv search
         searcher = ArxivSearcher()
         results = searcher.search_by_authors(authors, title)
+
+        # Store parsing information for display
+        ResultDisplayer._last_reference = reference
+        ResultDisplayer._last_authors = authors
+        ResultDisplayer._last_title = title
+        ResultDisplayer._last_query_url = getattr(
+            searcher, 'last_query_url', 'Not available')
 
         # Display results
         displayer = ResultDisplayer()
