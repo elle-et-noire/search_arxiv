@@ -82,13 +82,15 @@ def main():
 
         response = request_arxiv(match.get("authors", ""))
         if not response:
-            print(f"No response with {response.url}")
+            print("No valid authors found for search (all may contain hyphens)")
             sys.exit(1)
     except (FileNotFoundError, ValueError) as e:
         print(f"Error processing input: {e}")
         sys.exit(1)
     feed = feedparser.parse(response.text)
-    entries = sorted(feed.entries, key=lambda e: fuzz.ratio(
+    # Filter entries with similarity ratio > 20 and sort by ratio
+    entries = [e for e in feed.entries if fuzz.ratio(e.title, match.get("title", "")) > 50]
+    entries = sorted(entries, key=lambda e: fuzz.ratio(
         e.title, match.get("title", "")), reverse=True)
     if not entries:
         print(f"No results with {response.url}")
@@ -134,6 +136,8 @@ def main():
 
                     with open(filename, 'wb') as f:
                         f.write(response.content)
+
+                    print(f"Downloaded. ", end='')
                 except requests.RequestException as e:
                     print(f"Download failed: {e}")
                     continue
@@ -150,7 +154,7 @@ def main():
                 subprocess.Popen(['mupdf', filename],
                                  stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL)
-                print(f"Opening existing {filename} ...")
+                print(f"Opening {filename} ...")
             except (subprocess.CalledProcessError, FileNotFoundError):
                 print("mupdf not found. Please install mupdf or open the file manually.")
             return
