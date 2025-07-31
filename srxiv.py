@@ -104,18 +104,38 @@ def main():
             e = entries[int(user_input) - 1]
             filename = f"{e.id.split('/')[-1]}_{"".join(c for c in e.title if c.isalnum() or c in (' ', '-', '_')).rstrip().replace(' ', '_')[:40]}.pdf"
 
-            if os.path.exists(filename):
-                print(f"Opening existing {filename}...")
-                subprocess.Popen(['mupdf', filename])
-                return
+            if not os.path.exists(filename):
+                try:
+                    response = requests.get(e.id.replace(
+                        '/abs/', '/pdf/') + '.pdf', timeout=30)
+                    response.raise_for_status()
 
-            print(f"Downloading as {filename}")
-            response = requests.get(e.id, timeout=30)
-            response.raise_for_status()
-            with open(filename, 'wb') as f:
-                f.write(response.content)
-            subprocess.Popen(['mupdf', filename])
-            print(f"Opened {filename} with mupdf.")
+                    if not response.content.startswith(b'%PDF'):
+                        raise ValueError(
+                            "Downloaded content is not a valid PDF")
+
+                    with open(filename, 'wb') as f:
+                        f.write(response.content)
+                except requests.RequestException as e:
+                    print(f"Download failed: {e}")
+                    continue
+                except ValueError as e:
+                    print(f"Invalid file format: {e}")
+                    continue
+                except IOError as e:
+                    print(f"File write error: {e}")
+                    continue
+
+            try:
+                subprocess.run(['which', 'mupdf'],
+                               check=True, capture_output=True)
+                subprocess.Popen(['mupdf', filename],
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+                print(f"Opening existing {filename} ...")
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print(
+                    "mupdf not found. Please install mupdf or open the file manually.")
             return
 
         except KeyboardInterrupt:
