@@ -88,10 +88,8 @@ def main():
         print(f"Error processing input: {e}")
         sys.exit(1)
     feed = feedparser.parse(response.text)
-    # Filter entries with similarity ratio > 20 and sort by ratio
-    entries = [e for e in feed.entries if fuzz.ratio(
-        e.title, match.get("title", "")) > 50]
-    entries = sorted(entries, key=lambda e: fuzz.ratio(
+    entries = sorted([e for e in feed.entries if fuzz.ratio(
+        e.title, match.get("title", "")) > 50], key=lambda e: fuzz.ratio(
         e.title, match.get("title", "")), reverse=True)
     if not entries:
         print(f"No results with {response.url}")
