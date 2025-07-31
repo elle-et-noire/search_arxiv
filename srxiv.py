@@ -41,12 +41,15 @@ def get_reftxt(paper_path, refnum):
 
 
 def request_arxiv(authors, max_results=100):
-    blocks = re.split(r",\s+|\s+and+\s+", authors)
+    blocks = re.split(r",\s+|\s+and\s+", authors)
     query = []
     for author in blocks:
         surname = author.split(" ")[-1]
         if '-' not in surname:
             query.append(f'au:{surname}')
+
+    if not query:  # Handle case where all surnames have hyphens
+        return None
 
     try:
         response = requests.get(
@@ -67,11 +70,23 @@ def print_entry(e, j):
 
 
 def main():
-    match = get_reftxt(sys.argv[1], int(sys.argv[2]))
-    response = request_arxiv(match.get("authors", ""))
-    if not response:
-        print(f"No response with {response.url}")
-        return
+    if len(sys.argv) < 3:
+        print("Usage: python srxiv.py <PDF_PATH> <REFERENCE_NUMBER>")
+        sys.exit(1)
+
+    try:
+        match = get_reftxt(sys.argv[1], int(sys.argv[2]))
+        if not match:
+            print("Failed to extract reference information")
+            sys.exit(1)
+
+        response = request_arxiv(match.get("authors", ""))
+        if not response:
+            print(f"No response with {response.url}")
+            sys.exit(1)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error processing input: {e}")
+        sys.exit(1)
     feed = feedparser.parse(response.text)
     entries = sorted(feed.entries, key=lambda e: fuzz.ratio(
         e.title, match.get("title", "")), reverse=True)
@@ -102,7 +117,10 @@ def main():
                 print(f"Invalid input: {user_input}")
                 continue
             e = entries[int(user_input) - 1]
-            filename = f"{e.id.split('/')[-1]}_{"".join(c for c in e.title if c.isalnum() or c in (' ', '-', '_')).rstrip().replace(' ', '_')[:40]}.pdf"
+            arxiv_id = e.id.split('/')[-1]
+            title = "".join(
+                c for c in e.title if c.isalnum() or c in (' ', '-', '_')).rstrip().replace(' ', '_')[:40]
+            filename = f"{arxiv_id}_{title}.pdf"
 
             if not os.path.exists(filename):
                 try:
@@ -134,8 +152,7 @@ def main():
                                  stderr=subprocess.DEVNULL)
                 print(f"Opening existing {filename} ...")
             except (subprocess.CalledProcessError, FileNotFoundError):
-                print(
-                    "mupdf not found. Please install mupdf or open the file manually.")
+                print("mupdf not found. Please install mupdf or open the file manually.")
             return
 
         except KeyboardInterrupt:
