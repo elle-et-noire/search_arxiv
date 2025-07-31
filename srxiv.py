@@ -89,7 +89,8 @@ def main():
         sys.exit(1)
     feed = feedparser.parse(response.text)
     # Filter entries with similarity ratio > 20 and sort by ratio
-    entries = [e for e in feed.entries if fuzz.ratio(e.title, match.get("title", "")) > 50]
+    entries = [e for e in feed.entries if fuzz.ratio(
+        e.title, match.get("title", "")) > 50]
     entries = sorted(entries, key=lambda e: fuzz.ratio(
         e.title, match.get("title", "")), reverse=True)
     if not entries:
@@ -102,11 +103,13 @@ def main():
     disp_count = 1
     while True:
         try:
-            user_input = input(
-                f"command ([m]ore/dl [1-{len(entries)}]th/[q]uit): ").strip().lower()
+            s = "command (dl [1]st/[q]uit): " if len(
+                entries) == 1 else f"command ([m]ore/dl [1-{len(entries)}]th/[q]uit): "
+            user_input = input(s).strip().lower()
+
             if user_input == 'q':
                 return
-            if user_input == 'm':
+            if len(entries) > 1 and user_input == 'm':
                 if disp_count >= len(entries):
                     print("No more entries.")
                     continue
@@ -118,6 +121,7 @@ def main():
             if not user_input.isdigit() or not 0 < int(user_input) <= len(entries):
                 print(f"Invalid input: {user_input}")
                 continue
+
             e = entries[int(user_input) - 1]
             arxiv_id = e.id.split('/')[-1]
             title = "".join(
@@ -126,8 +130,8 @@ def main():
 
             if not os.path.exists(filename):
                 try:
-                    response = requests.get(e.id.replace(
-                        '/abs/', '/pdf/') + '.pdf', timeout=30)
+                    response = requests.get(
+                        e.id.replace('/abs/', '/pdf/') + '.pdf', timeout=30)
                     response.raise_for_status()
 
                     if not response.content.startswith(b'%PDF'):
