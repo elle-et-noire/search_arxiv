@@ -13,7 +13,6 @@ def process_line(line):
 
 
 def get_reftxt(paper_path, refnum):
-    reftxt = ""
     with fitz.open(paper_path) as doc:
         paper_txt = "".join(page.get_text() for page in doc)
 
@@ -22,14 +21,36 @@ def get_reftxt(paper_path, refnum):
         start_idx = next(i for i, line in enumerate(
             lines) if line.startswith(f"[{refnum}]"))
     except StopIteration:
-        reftxt = ""
-    else:
+        return ""
+    try:
+        end_idx = next(i for i, line in enumerate(
+            lines[start_idx+1:], start=start_idx+1) if re.match(r"^\[\d+\]", line))
+    except StopIteration:
+        end_idx = len(lines)
+
+    reftxt = ""
+    for j in range(start_idx, end_idx):
+        if j + 1 < end_idx and not lines[j+1][0].isupper():
+            reftxt += re.sub(r"([.,])$", r"\1 ", lines[j].rstrip("-"))
+        else:
+            reftxt += lines[j] + " "
+    return reftxt.strip()
+
+
+def request_arxiv(reftxt, max_results=100):
+    id_match = re.compile(r"(?P<arxiv_id>arXiv\:[^\s]+)").match(reftxt)
+    if id_match:
+        arxiv_id = id_match.group("arxiv_id")
         try:
-            end_idx = next(i for i, line in enumerate(
-                lines[start_idx+1:], start=start_idx+1) if re.match(r"^\[\d+\]", line))
-        except StopIteration:
-            end_idx = len(lines)
-        reftxt = "".join(map(process_line, lines[start_idx:end_idx])).strip()
+            response = requests.get(
+                f"https://export.arxiv.org/api/query?id_list={arxiv_id}",
+                timeout=10
+            )
+            response.raise_for_status()
+            return response
+        except requests.RequestException as e:
+            print(f"Error fetching arXiv ID {arxiv_id}: {e}")
+            pass  # if request with arXiv ID fails, continue to search by authors
 
     match = re.compile(
         r"^(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
@@ -37,31 +58,38 @@ def get_reftxt(paper_path, refnum):
         r"(?P<source>[^,]*,[^,]*)$"
     ).match(reftxt)
 
-    return match.groupdict() if match else None
+    if not match:
+        print("Match failed for the reference text.")
+        return None
 
-
-def request_arxiv(authors, max_results=100):
-    blocks = re.split(r",\s+|\s+and\s+", authors)
+    title = match.group("title")
+    authors = re.split(r",\s+|\s+and\s+",  match.group("authors"))
     query = []
-    for author in blocks:
+    for author in authors:
         surname = author.split(" ")[-1]
-        if '-' not in surname:
-            query.append(f'au:{surname}')
+        query.append(f"{surname}")
 
-    if not query:  # Handle case where all surnames have hyphens
+    if not query:
+        print("No authors found in the reference text.")
         return None
 
     try:
         response = requests.get(
             "https://export.arxiv.org/api/query", params={
-                "search_query": " AND ".join(query),
+                "search_query": ' '.join(query),
                 "start": 0,
                 "max_results": max_results
             }, timeout=10)
+        print(response.url)
         response.raise_for_status()
-        return response
     except requests.RequestException as e:
-        raise RuntimeError(f"arXiv API request failed: {e}")
+        print(f"Error fetching arXiv API: {e}")
+        return None
+
+    feed = feedparser.parse(response.text)
+    return sorted([e for e in feed.entries if fuzz.ratio(
+        e.title, title) > 50], key=lambda e: fuzz.ratio(
+        e.title, title), reverse=True)
 
 
 def print_entry(e, j):
@@ -75,24 +103,17 @@ def main():
         sys.exit(1)
 
     try:
-        match = get_reftxt(sys.argv[1], int(sys.argv[2]))
-        if not match:
-            print("Failed to extract reference information")
+        reftxt = get_reftxt(sys.argv[1], int(sys.argv[2]))
+        if not reftxt:
+            print("Failed to get reference text.")
             sys.exit(1)
 
-        response = request_arxiv(match.get("authors", ""))
-        if not response:
-            print("No valid authors found for search (all may contain hyphens)")
-            sys.exit(1)
     except (FileNotFoundError, ValueError) as e:
         print(f"Error processing input: {e}")
         sys.exit(1)
-    feed = feedparser.parse(response.text)
-    entries = sorted([e for e in feed.entries if fuzz.ratio(
-        e.title, match.get("title", "")) > 50], key=lambda e: fuzz.ratio(
-        e.title, match.get("title", "")), reverse=True)
+
+    entries = request_arxiv(reftxt)
     if not entries:
-        print(f"No results with {response.url}")
         return
 
     print()
