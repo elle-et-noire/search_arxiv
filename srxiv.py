@@ -1,3 +1,5 @@
+"""ArXiv Paper Search Tool - Extract references from PDFs and search arXiv."""
+
 import re
 import argparse
 import subprocess
@@ -10,36 +12,40 @@ import feedparser
 import requests
 
 
-def get_reftxt(pdfpath, refnum, findnth=1):
+def get_reftxt(pdfpath, refnum: int, findnth=1):
+    """Extract reference text from PDF by searching backwards for [refnum]."""
     with fitz.open(pdfpath) as doc:
         # Search pages backwards to find the page containing [refnum]
         count = 0
-        refpagenum = -1
-        for pagenum in range(len(doc) - 1, -1, -1):
-            pagetxt = doc[pagenum].get_text()
-            if re.search(rf"(^|\.\n)\[{refnum}\]", pagetxt):
-                refpagenum = pagenum
+        pnum = -1
+        for j in range(len(doc) - 1, -1, -1):
+            if re.search(rf"(^|\.\n)\[{refnum}\]", doc[j].get_text()):
+                pnum = j
                 count += 1
                 if count >= findnth:  # max appearance is main ref and SM ref
                     break
 
-        if refpagenum == -1:
+        if pnum == -1:
             return ""
 
         # Only use text up to the page containing the reference
-        pdftxt = "".join(page.get_text()
-                         for page in doc[refpagenum:refpagenum + 2])
+        pdftxt = "".join(
+            page.get_text() for page in doc[pnum:pnum + 2]
+        )
 
     lines = pdftxt.splitlines()
     ini = 0
     while ini < len(lines):
         # exclude the heading "[refnum]" in the main text
-        if lines[ini].startswith(f"[{refnum}]") and ini > 0 and lines[ini-1].strip().endswith("."):
+        if lines[ini].startswith(f"[{refnum}]") and \
+                ini > 0 and lines[ini-1].strip().endswith("."):
             break
         ini += 1
     try:
-        fin = next(i for i, line in enumerate(
-            lines[ini+1:], start=ini+1) if re.match(r"^\[\d+\]", line))
+        fin = next(
+            i for i, line in enumerate(lines[ini+1:], start=ini+1)
+            if re.match(r"^\[\d+\]", line)
+        )
     except StopIteration:
         fin = len(lines)
 
@@ -57,25 +63,33 @@ def get_reftxt(pdfpath, refnum, findnth=1):
     return reftxt.strip()
 
 
+def query_arxiv_api(query, max_results=10):
+    """Query the arXiv API with given parameters."""
+    try:
+        response = requests.get(
+            "https://export.arxiv.org/api/query", params={
+                "search_query": query,
+                "start": 0,
+                "max_results": max_results,
+            },
+            timeout=10
+        )
+        print(response.url)  # Debugging: Show the request URL
+        response.raise_for_status()
+        return feedparser.parse(response.text).entries
+    except requests.RequestException as e:
+        print(f"Error fetching data from arXiv: {e}", file=sys.stderr)
+        return None
+
+
 def request_arxiv(reftxt, mode=None, max_results=10):
+    """Search arXiv API using reference text or arXiv ID."""
     id_match = re.search(r"ar\s?Xiv:(?P<arxiv_id>[^\s,]+)", reftxt)
     if id_match:
-        arxiv_id = id_match.group("arxiv_id")
-        try:
-            response = requests.get(
-                "https://export.arxiv.org/api/query", params={
-                    "search_query": arxiv_id,
-                    "start": 0,
-                    "max_results": max_results
-                }, timeout=10)
-            print(response.url)
-            response.raise_for_status()
-            return feedparser.parse(response.text).entries
-        except requests.RequestException as e:
-            print(f"Error in fetching with arXiv ID {arxiv_id}: {e}")
-            sys.exit(1)
+        return query_arxiv_api(id_match.group("arxiv_id"), max_results)
 
-    jnlpat = r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)"
+    jnlpat = (r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)"
+              r"|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)")
 
     refpat = [
         # case1: the title is surrounded by quotes
@@ -108,7 +122,7 @@ def request_arxiv(reftxt, mode=None, max_results=10):
     if not match:
         print("Match failed for the reference text:")
         print(reftxt)
-        sys.exit(1)
+        return None
 
     title = match.group("title").strip(
     ) if "title" in match.groupdict() else ""
@@ -124,88 +138,47 @@ def request_arxiv(reftxt, mode=None, max_results=10):
     if not query:
         print("No authors and title words in the reference text:")
         print(reftxt)
-        sys.exit(1)
+        return None
 
-    try:
-        response = requests.get(
-            "https://export.arxiv.org/api/query", params={
-                "search_query": query,
-                "start": 0,
-                "max_results": max_results
-            }, timeout=10)
-        print(response.url)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        print(f"Error fetching arXiv API: {e}")
-        sys.exit(1)
-
-    return feedparser.parse(response.text).entries
+    return query_arxiv_api(query, max_results)
 
 
 def print_entry(e, j):
+    """Print formatted arXiv entry with title and authors."""
     print(f"[{j+1}]  {e.title}\n")
     print(f"  by {', '.join(author.name for author in e.authors)} ({e.id})\n")
 
 
 def dl_open_pdf(e):
+    """Download PDF from arXiv entry and open with mupdf."""
     arxiv_id = e.id.split('/')[-1]
     safe_title = re.sub(r'[^\w\s-]', '', e.title)
     safe_title = re.sub(r'(\s|-)+', '_', safe_title).strip('_')[:40]
     filepath = Path(f"{arxiv_id}_{safe_title}.pdf")
 
     if not filepath.exists():
-        response = requests.get(
-            e.id.replace('/abs/', '/pdf/') + '.pdf', timeout=30)
-        response.raise_for_status()
-        if not response.content.startswith(b'%PDF'):
-            raise ValueError("Downloaded content is not a valid PDF.")
-
-        with open(filepath, 'wb') as f:
-            f.write(response.content)
-
+        with requests.get(
+                e.id.replace('/abs/', '/pdf/') + '.pdf',
+                timeout=30, stream=True) as response:
+            response.raise_for_status()
+            if not response.content.startswith(b'%PDF'):
+                raise ValueError("Downloaded content is not a valid PDF.")
+            filepath.write_bytes(response.content)
         print("Downloaded. ", end='')
 
     if mupdf_path := shutil.which('mupdf'):
-        subprocess.Popen([mupdf_path, filepath],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with subprocess.Popen(
+            [mupdf_path, filepath],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL):
+            pass  # Process will continue running in background
         print(f"Opening {filepath.name} ...")
     else:
         print("mupdf not found. Please install mupdf or open the file manually.")
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Search for arXiv papers from a PDF reference or an arXiv ID."
-    )
-    parser.add_argument(
-        "id", help="Path to a PDF file or an arXiv ID.")
-    parser.add_argument("refnum", nargs='?', type=int,
-                        help="Reference number in the PDF (e.g., 23).")
-    parser.add_argument("-p", "--pattern", type=int, choices=[
-                        1, 2, 3], help="Force a specific regex pattern for reference parsing.")
-    parser.add_argument("-d", "--depth", type=int, default=1,
-                        help="n-th occurrence backwards.")
-
-    args = parser.parse_args()
-
-    if Path(args.id).is_file():
-        if not args.refnum:
-            print("Error: Reference number is required when providing a PDF file.")
-            sys.exit(1)
-
-        reftxt = get_reftxt(args.id, args.refnum, args.depth)
-        if not reftxt:
-            print("Failed to get reference text.")
-            sys.exit(1)
-    else:
-        reftxt = f"arXiv:{args.id}"
-
-    entries = request_arxiv(
-        reftxt, mode=args.pattern if args.pattern else None)
-
-    if not entries:
-        sys.exit(1)
-
+def interactive_search(entries):
+    """Handle interactive search and download interface."""
     print()
     print_entry(entries[0], 0)
 
@@ -221,6 +194,7 @@ def main():
 
             if user_input == 'q':
                 return
+
             if len(entries) > 1 and user_input == 'm':
                 if disp_count >= len(entries):
                     print("No more entries.")
@@ -230,6 +204,7 @@ def main():
                     print_entry(entries[j], j)
                 disp_count += remnum
                 continue
+
             if not user_input.isdigit() or not 0 < int(user_input) <= len(entries):
                 print(f"Invalid input: {user_input}")
                 continue
@@ -244,9 +219,45 @@ def main():
         except EOFError:
             print("\n\nEOFError. Exiting...")
             break
-        except Exception as e:
-            print(f"Error: {e}")
+
+
+def main():
+    """Main function - parse arguments and run interactive search."""
+    parser = argparse.ArgumentParser(
+        description="Search for arXiv papers from a PDF reference or an arXiv ID."
+    )
+    parser.add_argument(
+        "id", help="Path to a PDF file or an arXiv ID.")
+    parser.add_argument(
+        "refnum", nargs='?', type=int,
+        help="Reference number in the PDF (e.g., 23).")
+    parser.add_argument(
+        "-p", "--pattern", type=int, choices=[1, 2, 3],
+        help="Force a specific regex pattern for reference parsing.")
+    parser.add_argument(
+        "-d", "--depth", type=int, default=1,
+        help="Backwards search depth for the reference number.")
+
+    args = parser.parse_args()
+
+    if Path(args.id).is_file():
+        if not args.refnum:
+            print("Error: Reference number is required when providing a PDF file.")
             sys.exit(1)
+
+        reftxt = get_reftxt(args.id, args.refnum, args.depth)
+        if not reftxt:
+            print("Failed to get reference text.")
+            sys.exit(1)
+    else:
+        reftxt = f"arXiv:{args.id}"
+
+    entries = request_arxiv(reftxt, mode=args.pattern)
+
+    if not entries:
+        sys.exit(1)
+
+    interactive_search(entries)
 
 
 if __name__ == "__main__":
