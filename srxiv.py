@@ -8,10 +8,6 @@ import subprocess
 import sys
 
 
-def process_line(line):
-    return re.sub(r"([.,])$", r"\1 ", line.rstrip("-"))
-
-
 def get_reftxt(paper_path, refnum):
     with fitz.open(paper_path) as doc:
         paper_txt = "".join(page.get_text() for page in doc)
@@ -38,29 +34,33 @@ def get_reftxt(paper_path, refnum):
 
 
 def request_arxiv(reftxt, max_results=100):
-    id_match = re.compile(r"(?P<arxiv_id>arXiv\:[^\s]+)").match(reftxt)
+    id_match = re.search(r"arXiv:(?P<arxiv_id>[^\s,]+)", reftxt)
     if id_match:
         arxiv_id = id_match.group("arxiv_id")
         try:
             response = requests.get(
-                f"https://export.arxiv.org/api/query?id_list={arxiv_id}",
-                timeout=10
-            )
+                f"https://export.arxiv.org/api/query", params={
+                    "search_query": arxiv_id,
+                    "start": 0,
+                    "max_results": max_results
+                }, timeout=10)
+            print(response.url)
             response.raise_for_status()
-            return response
+            return feedparser.parse(response.text).entries
         except requests.RequestException as e:
             print(f"Error fetching arXiv ID {arxiv_id}: {e}")
             pass  # if request with arXiv ID fails, continue to search by authors
 
     match = re.compile(
-        r"^(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
-        r"(?P<title>.*),\s"
-        r"(?P<source>[^,]*,[^,]*)$"
+        r"^(?:\[\d+\]\s)?(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
+        r"(?P<title>.*),"
+        r"(?P<source>[^,]+,[^,]+)$"
     ).match(reftxt)
 
     if not match:
-        print("Match failed for the reference text.")
-        return None
+        print("Match failed for the reference text:")
+        print(reftxt)
+        return
 
     title = match.group("title")
     authors = re.split(r",\s+|\s+and\s+",  match.group("authors"))
@@ -71,7 +71,7 @@ def request_arxiv(reftxt, max_results=100):
 
     if not query:
         print("No authors found in the reference text.")
-        return None
+        return
 
     try:
         response = requests.get(
@@ -84,7 +84,7 @@ def request_arxiv(reftxt, max_results=100):
         response.raise_for_status()
     except requests.RequestException as e:
         print(f"Error fetching arXiv API: {e}")
-        return None
+        return
 
     feed = feedparser.parse(response.text)
     return sorted([e for e in feed.entries if fuzz.ratio(
