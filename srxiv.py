@@ -1,37 +1,38 @@
 import feedparser
 import fitz
-from rapidfuzz import fuzz
 import re
 import os
 import requests
 import subprocess
 import sys
-import operator
+from itertools import chain
 
 
-def get_reftxt(paper_path, refnum):
+def get_reftxt(paper_path, refnum, findnth=1):
     with fitz.open(paper_path) as doc:
         paper_txt = "".join(page.get_text() for page in doc)
 
     lines = paper_txt.splitlines()
-    j = 0
-    while j < len(lines):
+    ini = 0
+    count = 0
+    while ini < len(lines):
         # deal with cases where the reference number accidentally appears at the head of a line in the main text
-        if lines[j].startswith(f"[{refnum}]") and j > 0 and lines[j-1].strip().endswith("."):
-            break
-        j += 1
-    start_idx = j
+        if lines[ini].startswith(f"[{refnum}]") and ini > 0 and lines[ini-1].strip().endswith("."):
+            count += 1
+            if count == findnth:
+                break
+        ini += 1
     try:
-        end_idx = next(i for i, line in enumerate(
-            lines[j+1:], start=j+1) if re.match(r"^\[\d+\]", line))
+        fin = next(i for i, line in enumerate(
+            lines[ini+1:], start=ini+1) if re.match(r"^\[\d+\]", line))
     except StopIteration:
-        end_idx = len(lines)
+        fin = len(lines)
 
     reftxt = ""
-    for j in range(start_idx, end_idx):
+    for j in range(ini, fin):
         # this procedure cannot deal with for example "non-unitary"
         if lines[j].endswith("-"):
-            if j + 1 < end_idx and lines[j + 1][0].isupper():
+            if j + 1 < fin and lines[j + 1][0].isupper():
                 reftxt += lines[j]  # ex.) non-Hermitian
             else:
                 reftxt += lines[j].rstrip("-")
@@ -55,32 +56,44 @@ def request_arxiv(reftxt, max_results=10):
             response.raise_for_status()
             return feedparser.parse(response.text).entries
         except requests.RequestException as e:
-            print(f"Error fetching arXiv ID {arxiv_id}: {e}")
+            print(f"Error in fetching with arXiv ID {arxiv_id}: {e}")
             sys.exit(1)
 
-    match = re.compile(
-        r"^(?:\[\d+\]\s)?(?P<for_query>.*),\"?\s"
-        # r"^(?:\[\d+\]\s)?(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
-        r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)[^,]+\.)"
+    # case1: the title is surrounded by quotes
+    match1 = re.compile(
+        r"^\[\d+\]\s(?P<authors>.*),\s"
+        r"(“|\")(?P<title>.*),(”|\")\s"
+        r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)"
     ).match(reftxt)
-    title = ""
+
+    # case2: the title is not surrounded by quotes
+    match2 = re.compile(
+        r"^\[\d+\]\s(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
+        r"(?P<title>.*),\s"
+        r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)"
+    ).match(reftxt)
+
+    # case3: no title, just authors and journal
+    match3 = re.compile(
+        r"^\[\d+\]\s(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
+        r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)"
+    ).match(reftxt)
+
+    match = match1 or match2 or match3
 
     if not match:
-        match = re.compile(
-            r"^(?:\[\d+\]\s)?(?P<for_query>(?:.+? and .+?)|(?:[^,]+)),\s"
-            r"(?P<title>.*),"
-            r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)[^,]+\.)"
-        ).match(reftxt)
+        print("Match failed for the reference text:")
+        print(reftxt)
+        sys.exit(1)
 
-        if not match:
-            print("Match failed for the reference text:")
-            print(reftxt)
-            sys.exit(1)
-        else:
-            title = match.group("title").strip()
-
-    block = re.split(r",\s+|\s+and\s+|\s", match.group("for_query"))
-    query = [b for b in block if b.isalnum()]
+    title = match.group("title").strip(
+    ) if "title" in match.groupdict() else ""
+    authors = match.group("authors").strip()
+    word_pattern = r'\b(?![Aa]nd\b)[a-zA-Z0-9]+\b'
+    query = ' '.join(chain(
+        (f'au:{w}' for w in re.findall(word_pattern, authors)),
+        re.findall(word_pattern, title)
+    ))
 
     if not query:
         print("No authors and title words in the reference text:")
@@ -90,7 +103,7 @@ def request_arxiv(reftxt, max_results=10):
     try:
         response = requests.get(
             "https://export.arxiv.org/api/query", params={
-                "search_query": ' '.join(query),
+                "search_query": query,
                 "start": 0,
                 "max_results": max_results
             }, timeout=10)
@@ -100,10 +113,7 @@ def request_arxiv(reftxt, max_results=10):
         print(f"Error fetching arXiv API: {e}")
         sys.exit(1)
 
-    feed = feedparser.parse(response.text)
-    if not title:
-        return feed.entries
-    return list(map(operator.itemgetter(1), sorted([(r, e) for e in feed.entries if (r := fuzz.ratio(e.title, title)) > 50], reverse=True)))
+    return feedparser.parse(response.text).entries
 
 
 def print_entry(e, j):
