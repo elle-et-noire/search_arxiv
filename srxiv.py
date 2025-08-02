@@ -6,6 +6,7 @@ import os
 import requests
 import subprocess
 import sys
+import operator
 
 
 def get_reftxt(paper_path, refnum):
@@ -64,13 +65,11 @@ def request_arxiv(reftxt, max_results=100):
 
     title = match.group("title")
     authors = re.split(r",\s+|\s+and\s+",  match.group("authors"))
-    query = []
-    for author in authors:
-        surname = author.split(" ")[-1]
-        query.append(f"{surname}")
+    query = [author.split(" ")[-1] for author in authors]
 
     if not query:
-        print("No authors found in the reference text.")
+        print("No authors found in the reference text:")
+        print(reftxt)
         return
 
     try:
@@ -87,14 +86,40 @@ def request_arxiv(reftxt, max_results=100):
         return
 
     feed = feedparser.parse(response.text)
-    return sorted([e for e in feed.entries if fuzz.ratio(
-        e.title, title) > 50], key=lambda e: fuzz.ratio(
-        e.title, title), reverse=True)
+    return list(map(operator.itemgetter(1), sorted([(r, e) for e in feed.entries if (r := fuzz.ratio(e.title, title)) > 50], reverse=True)))
 
 
 def print_entry(e, j):
     print(f"[{j+1}]  {e.title}\n")
     print(f"  by {', '.join(author.name for author in e.authors)} ({e.id})\n")
+
+
+def dl_open_pdf(e):
+    arxiv_id = e.id.split('/')[-1]
+    title = "".join(
+        c for c in e.title if c.isalnum() or c in (' ', '-', '_')).rstrip().replace(' ', '_')[:40]
+    filename = f"{arxiv_id}_{title}.pdf"
+
+    if not os.path.exists(filename):
+        response = requests.get(
+            e.id.replace('/abs/', '/pdf/') + '.pdf', timeout=30)
+        response.raise_for_status()
+        if not response.content.startswith(b'%PDF'):
+            raise ValueError("Downloaded content is not a valid PDF")
+
+        with open(filename, 'wb') as f:
+            f.write(response.content)
+
+        print(f"Downloaded. ", end='')
+
+    try:
+        subprocess.run(['which', 'mupdf'], check=True, capture_output=True)
+        subprocess.Popen(['mupdf', filename],
+                         stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+        print(f"Opening {filename} ...")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("mupdf not found. Please install mupdf or open the file manually.")
 
 
 def main():
@@ -122,8 +147,11 @@ def main():
     disp_count = 1
     while True:
         try:
-            s = "command (dl [1]st/[q]uit): " if len(
-                entries) == 1 else f"command ([m]ore/dl [1-{len(entries)}]th/[q]uit): "
+            if (n := len(entries)) == 1:
+                s = "command (dl [1]st/[q]uit): "
+            else:
+                s = f"command ([m]ore/dl [1-{n}]th/[q]uit): "
+
             user_input = input(s).strip().lower()
 
             if user_input == 'q':
@@ -132,55 +160,18 @@ def main():
                 if disp_count >= len(entries):
                     print("No more entries.")
                     continue
-                remaining = min(5, len(entries) - disp_count)
-                for j in range(disp_count, disp_count + remaining):
+                remnum = min(5, len(entries) - disp_count)
+                for j in range(disp_count, disp_count + remnum):
                     print_entry(entries[j], j)
-                disp_count += remaining
+                disp_count += remnum
                 continue
             if not user_input.isdigit() or not 0 < int(user_input) <= len(entries):
                 print(f"Invalid input: {user_input}")
                 continue
 
             e = entries[int(user_input) - 1]
-            arxiv_id = e.id.split('/')[-1]
-            title = "".join(
-                c for c in e.title if c.isalnum() or c in (' ', '-', '_')).rstrip().replace(' ', '_')[:40]
-            filename = f"{arxiv_id}_{title}.pdf"
-
-            if not os.path.exists(filename):
-                try:
-                    response = requests.get(
-                        e.id.replace('/abs/', '/pdf/') + '.pdf', timeout=30)
-                    response.raise_for_status()
-
-                    if not response.content.startswith(b'%PDF'):
-                        raise ValueError(
-                            "Downloaded content is not a valid PDF")
-
-                    with open(filename, 'wb') as f:
-                        f.write(response.content)
-
-                    print(f"Downloaded. ", end='')
-                except requests.RequestException as e:
-                    print(f"Download failed: {e}")
-                    continue
-                except ValueError as e:
-                    print(f"Invalid file format: {e}")
-                    continue
-                except IOError as e:
-                    print(f"File write error: {e}")
-                    continue
-
-            try:
-                subprocess.run(['which', 'mupdf'],
-                               check=True, capture_output=True)
-                subprocess.Popen(['mupdf', filename],
-                                 stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL)
-                print(f"Opening {filename} ...")
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                print("mupdf not found. Please install mupdf or open the file manually.")
-            return
+            dl_open_pdf(e)
+            break
 
         except KeyboardInterrupt:
             print("\n\nInterrupted by user. Exiting...")
@@ -190,7 +181,7 @@ def main():
             break
         except Exception as e:
             print(f"Error: {e}")
-            continue
+            break
 
 
 if __name__ == "__main__":
