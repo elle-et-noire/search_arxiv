@@ -6,60 +6,72 @@ Extract references from PDFs and search arXiv for similar papers, or search dire
 
 ```bash
 pip install PyMuPDF requests feedparser
-sudo apt install mupdf  # PDF viewer
+sudo apt install mupdf  # Recommended PDF viewer
 ```
 
 ## Usage
 
-**Three modes:**
-
-1. **PDF reference extraction:**
-   ```bash
-   python srxiv.py <PDF_PATH> <REFERENCE_NUMBER> [<PATTERN_MODE>]
-   ```
-
-2. **PDF reference extraction from Supplementary Material:**
-   ```bash
-   python srxiv.py <PDF_PATH> S<REFERENCE_NUMBER> [<PATTERN_MODE>]
-   ```
-
-3. **Direct arXiv ID search:**
-   ```bash
-   python srxiv.py <ARXIV_ID>
-   ```
-
-**Examples:**
 ```bash
-python srxiv.py paper.pdf 5          # Extract [5] from PDF
-python srxiv.py paper.pdf S5         # Extract [5] of Supplementary Material from PDF
-python srxiv.py paper.pdf 5 2        # Use pattern mode 2 for parsing
-python srxiv.py 1234.56789           # Search by arXiv ID directly
+python srxiv.py <id> [refnum] [-p PATTERN] [-d DEPTH]
 ```
 
-## Pattern Modes
+### Arguments
 
-For reference parsing, you can specify pattern modes (1-3):
-- **Mode 1**: Title in quotes: `[N] Authors, "Title", Journal (Year).`
-- **Mode 2**: Title without quotes: `[N] Authors, Title, Journal (Year).`
-- **Mode 3**: No title: `[N] Authors, Journal (Year).`
+-   `id`: Path to a PDF file or an arXiv ID.
+-   `refnum`: (Optional) The reference number to extract from the PDF. Required if `id` is a PDF file.
+-   `-p, --pattern`: (Optional) Force a specific regex pattern (1-3) for parsing the reference.
+-   `-d, --depth`: (Optional) Find the N-th occurrence of the reference when searching backwards from the end of the PDF. Default is 1.
+
+### Modes of Operation
+
+1.  **PDF Reference Extraction**: Provide a PDF path and a reference number.
+    ```bash
+    python srxiv.py path/to/paper.pdf 5
+    ```
+2.  **Direct arXiv ID Search**: Provide an arXiv ID.
+    ```bash
+    python srxiv.py 1234.56789
+    ```
+
+### Examples
+
+```bash
+# Extract reference [5] from a PDF
+python srxiv.py paper.pdf 5
+
+# Find the 2nd occurrence of reference [5] (e.g., in the reference of the main text where the PDF contains supplementary references)
+python srxiv.py paper.pdf 5 --depth 2
+
+# Force parsing pattern #2 for a reference
+python srxiv.py paper.pdf 5 --pattern 2
+
+# Search directly by arXiv ID
+python srxiv.py 1234.56789
+```
+
+## Reference Parsing Patterns (`-p`)
+
+-   **Pattern 1**: Title is surrounded by quotes.
+    -   `[1] Authors, "The Title.", Journal...`
+-   **Pattern 2**: Title is not surrounded by quotes.
+    -   `[2] Authors, The Title, Journal...`
+-   **Pattern 3**: No title, only authors and journal info.
+    -   `[3] Authors, Journal...`
 
 ## Interactive Commands
 
-- `m` - Show more results (5 at a time)
-- `1`, `2`, `3`... - Download and open PDF (exits after opening)
-- `q` - Quit
+-   `m`: Show more results.
+-   `1`, `2`, `3`...: Download and open the PDF for the selected entry.
+-   `q`: Quit the application.
 
 ## How It Works
 
-**PDF mode:**
-1. Search PDF pages backwards to find reference page
-2. Extract text from reference page and next page only
-3. Parse reference using regex patterns to get authors and title
-4. Search arXiv API using author names and title keywords
+1.  **PDF Parsing**: If a PDF path is given, it searches backwards from the last page to find the page containing the specified reference number (`[N]`). It then extracts the text from that page and the next to ensure the full reference is captured.
+2.  **Reference Matching**: It uses a set of regular expressions to parse the extracted text for authors and title. A specific pattern can be forced with the `--pattern` flag.
+3.  **arXiv API Query**:
+    -   If an `arXiv:ID` is found in the reference, it queries the API directly with that ID.
+    -   Otherwise, it constructs a search query using keywords from the parsed authors and title.
+4.  **Results**: Displays the search results and enters an interactive mode for browsing and downloading.
 
-**arXiv ID mode:**
-1. Directly fetch paper by arXiv ID from API
-2. Display paper information
-
-Downloaded PDFs: `{arxiv_id}_{title[:40]}.pdf`
+Downloaded PDFs are saved as `{arxiv_id}_{safe_title}.pdf`.
 
