@@ -8,19 +8,32 @@ import sys
 from itertools import chain
 
 
-def get_reftxt(paper_path, refnum, findnth=1):
-    with fitz.open(paper_path) as doc:
-        paper_txt = "".join(page.get_text() for page in doc)
+def get_reftxt(pdfpath, refnum, findnth=2):
+    with fitz.open(pdfpath) as doc:
+        # Search pages backwards to find the page containing [refnum]
+        count = 0
+        refpagenum = None
+        for pagenum in range(len(doc) - 1, -1, -1):
+            pagetxt = doc[pagenum].get_text()
+            if re.search(rf"(^|\.\n)\[{refnum}\]", pagetxt):
+                refpagenum = pagenum
+                count += 1
+                if count >= findnth:
+                    break
 
-    lines = paper_txt.splitlines()
+        if refpagenum is None:
+            return ""
+
+        # Only use text up to the page containing the reference
+        pdftxt = "".join(page.get_text()
+                         for page in doc[refpagenum:refpagenum + 2])
+
+    lines = pdftxt.splitlines()
     ini = 0
-    count = 0
     while ini < len(lines):
         # deal with cases where the reference number accidentally appears at the head of a line in the main text
         if lines[ini].startswith(f"[{refnum}]") and ini > 0 and lines[ini-1].strip().endswith("."):
-            count += 1
-            if count == findnth:
-                break
+            break
         ini += 1
     try:
         fin = next(i for i, line in enumerate(
@@ -41,7 +54,7 @@ def get_reftxt(paper_path, refnum, findnth=1):
     return reftxt.strip()
 
 
-def request_arxiv(reftxt, max_results=10):
+def request_arxiv(reftxt, mode=None, max_results=10):
     id_match = re.search(r"ar\s?Xiv:(?P<arxiv_id>[^\s,]+)", reftxt)
     if id_match:
         arxiv_id = id_match.group("arxiv_id")
@@ -59,27 +72,33 @@ def request_arxiv(reftxt, max_results=10):
             print(f"Error in fetching with arXiv ID {arxiv_id}: {e}")
             sys.exit(1)
 
-    # case1: the title is surrounded by quotes
-    match1 = re.compile(
-        r"^\[\d+\]\s(?P<authors>.*),\s"
-        r"(“|\")(?P<title>.*),(”|\")\s"
-        r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)"
-    ).match(reftxt)
+    refpat = [
+        # case1: the title is surrounded by quotes
+        re.compile(
+            r"^\[\d+\]\s(?P<authors>.*),\s"
+            r"(“|\")(?P<title>.*),(”|\")\s"
+            r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)"
+        ),
 
-    # case2: the title is not surrounded by quotes
-    match2 = re.compile(
-        r"^\[\d+\]\s(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
-        r"(?P<title>.*),\s"
-        r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)"
-    ).match(reftxt)
+        # case2: the title is not surrounded by quotes
+        re.compile(
+            r"^\[\d+\]\s(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
+            r"(?P<title>.*),\s"
+            r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)"
+        ),
 
-    # case3: no title, just authors and journal
-    match3 = re.compile(
-        r"^\[\d+\]\s(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
-        r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)"
-    ).match(reftxt)
+        # case3: no title, just authors and journal
+        re.compile(
+            r"^\[\d+\]\s(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
+            r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)"
+        )
+    ]
 
-    match = match1 or match2 or match3
+    if mode is None or not mode.isdigit() or not 1 <= int(mode) <= 3:
+        match = refpat[0].match(reftxt) or refpat[1].match(
+            reftxt) or refpat[2].match(reftxt)
+    else:
+        match = refpat[int(mode) - 1].match(reftxt)
 
     if not match:
         print("Match failed for the reference text:")
@@ -89,9 +108,11 @@ def request_arxiv(reftxt, max_results=10):
     title = match.group("title").strip(
     ) if "title" in match.groupdict() else ""
     authors = match.group("authors").strip()
-    word_pattern = r'\b(?![Aa]nd\b)[a-zA-Z0-9]+\b'
+    # single alphabet is noisy for search
+    word_pattern = r'\b(?![Aa]nd\b)[a-zA-Z0-9]{2,}\b'
     query = ' '.join(chain(
-        (f'au:{w}' for w in re.findall(word_pattern, authors)),
+        (f'au:{w}' for w in sorted(re.findall(
+            word_pattern, authors), key=len, reverse=True)),
         re.findall(word_pattern, title)
     ))
 
@@ -152,12 +173,17 @@ def dl_open_pdf(e):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python srxiv.py <PDF_PATH> <REFERENCE_NUMBER> |\n       python srxiv.py <arXiv_ID>")
+        print(
+            "Usage: python srxiv.py <PDF_PATH> <REFERENCE_NUMBER> [<REFERENCE_PATTERN>] |\n       python srxiv.py <arXiv_ID>")
         sys.exit(1)
 
     if os.path.isfile(sys.argv[1]):
         try:
-            reftxt = get_reftxt(sys.argv[1], int(sys.argv[2]))
+            if sys.argv[2].isdigit():
+                reftxt = get_reftxt(sys.argv[1], int(sys.argv[2]))
+            else:
+                reftxt = get_reftxt(sys.argv[1], int(sys.argv[2][1:]), 1)
+
             if not reftxt:
                 print("Failed to get reference text.")
                 sys.exit(1)
@@ -168,7 +194,8 @@ def main():
     else:
         reftxt = "arXiv:" + sys.argv[1]
 
-    entries = request_arxiv(reftxt)
+    entries = request_arxiv(
+        reftxt, mode=sys.argv[3] if len(sys.argv) > 3 else None)
     if not entries:
         sys.exit(1)
 
