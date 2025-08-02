@@ -27,7 +27,7 @@ def get_reftxt(paper_path, refnum):
 
     reftxt = ""
     for j in range(start_idx, end_idx):
-        if j + 1 < end_idx and not lines[j+1][0].isupper():
+        if j + 1 < end_idx and lines[j+1][0].islower():
             reftxt += re.sub(r"([.,])$", r"\1 ", lines[j].rstrip("-"))
         else:
             reftxt += lines[j] + " "
@@ -35,7 +35,7 @@ def get_reftxt(paper_path, refnum):
 
 
 def request_arxiv(reftxt, max_results=100):
-    id_match = re.search(r"arXiv:(?P<arxiv_id>[^\s,]+)", reftxt)
+    id_match = re.search(r"ar\s?Xiv:(?P<arxiv_id>[^\s,]+)", reftxt)
     if id_match:
         arxiv_id = id_match.group("arxiv_id")
         try:
@@ -55,8 +55,16 @@ def request_arxiv(reftxt, max_results=100):
     match = re.compile(
         r"^(?:\[\d+\]\s)?(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
         r"(?P<title>.*),"
-        r"(?P<source>[^,]+,[^,]+)$"
+        r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.$)|(?:[^,]+\((?P<year2>\d+)\)[^,]+$)"
     ).match(reftxt)
+
+    # TODO: deal with citation forms without title
+    # if not match:
+    #     match = re.compile(
+    #         r"^(?:\[\d+\]\s)?(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
+    #         r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.$)|(?:[^,]+\((?P<year2>\d+)\)[^,]+$)"
+    #     ).match(reftxt)
+    #     title = ""
 
     if not match:
         print("Match failed for the reference text:")

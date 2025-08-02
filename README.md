@@ -48,5 +48,3 @@ python srxiv.py 1234.56789           # Search by arXiv ID directly
 2. Display paper information
 
 Downloaded PDFs: `{arxiv_id}_{title}.pdf`
-
-
