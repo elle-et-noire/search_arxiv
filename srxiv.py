@@ -1,27 +1,29 @@
-import feedparser
-import fitz
 import re
-import os
-import requests
+import argparse
 import subprocess
 import sys
 from itertools import chain
+import shutil
+from pathlib import Path
+import fitz
+import feedparser
+import requests
 
 
-def get_reftxt(pdfpath, refnum, findnth=2):
+def get_reftxt(pdfpath, refnum, findnth=1):
     with fitz.open(pdfpath) as doc:
         # Search pages backwards to find the page containing [refnum]
         count = 0
-        refpagenum = None
+        refpagenum = -1
         for pagenum in range(len(doc) - 1, -1, -1):
             pagetxt = doc[pagenum].get_text()
             if re.search(rf"(^|\.\n)\[{refnum}\]", pagetxt):
                 refpagenum = pagenum
                 count += 1
-                if count >= findnth:
+                if count >= findnth:  # max appearance is main ref and SM ref
                     break
 
-        if refpagenum is None:
+        if refpagenum == -1:
             return ""
 
         # Only use text up to the page containing the reference
@@ -31,7 +33,7 @@ def get_reftxt(pdfpath, refnum, findnth=2):
     lines = pdftxt.splitlines()
     ini = 0
     while ini < len(lines):
-        # deal with cases where the reference number accidentally appears at the head of a line in the main text
+        # exclude the heading "[refnum]" in the main text
         if lines[ini].startswith(f"[{refnum}]") and ini > 0 and lines[ini-1].strip().endswith("."):
             break
         ini += 1
@@ -43,7 +45,7 @@ def get_reftxt(pdfpath, refnum, findnth=2):
 
     reftxt = ""
     for j in range(ini, fin):
-        # this procedure cannot deal with for example "non-unitary"
+        # this procedure unevitably changes "non-unitary" to "nonunitary"
         if lines[j].endswith("-"):
             if j + 1 < fin and lines[j + 1][0].isupper():
                 reftxt += lines[j]  # ex.) non-Hermitian
@@ -51,6 +53,7 @@ def get_reftxt(pdfpath, refnum, findnth=2):
                 reftxt += lines[j].rstrip("-")
         else:
             reftxt += lines[j] + " "
+
     return reftxt.strip()
 
 
@@ -60,7 +63,7 @@ def request_arxiv(reftxt, mode=None, max_results=10):
         arxiv_id = id_match.group("arxiv_id")
         try:
             response = requests.get(
-                f"https://export.arxiv.org/api/query", params={
+                "https://export.arxiv.org/api/query", params={
                     "search_query": arxiv_id,
                     "start": 0,
                     "max_results": max_results
@@ -72,29 +75,31 @@ def request_arxiv(reftxt, mode=None, max_results=10):
             print(f"Error in fetching with arXiv ID {arxiv_id}: {e}")
             sys.exit(1)
 
+    jnlpat = r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)"
+
     refpat = [
         # case1: the title is surrounded by quotes
         re.compile(
             r"^\[\d+\]\s(?P<authors>.*),\s"
             r"(“|\")(?P<title>.*),(”|\")\s"
-            r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)"
+            f"{jnlpat}"
         ),
 
         # case2: the title is not surrounded by quotes
         re.compile(
             r"^\[\d+\]\s(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
             r"(?P<title>.*),\s"
-            r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)"
+            f"{jnlpat}"
         ),
 
         # case3: no title, just authors and journal
         re.compile(
             r"^\[\d+\]\s(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
-            r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)"
+            f"{jnlpat}"
         )
     ]
 
-    if mode is None or not mode.isdigit() or not 1 <= int(mode) <= 3:
+    if mode is None or not 1 <= mode <= 3:
         match = refpat[0].match(reftxt) or refpat[1].match(
             reftxt) or refpat[2].match(reftxt)
     else:
@@ -144,58 +149,60 @@ def print_entry(e, j):
 
 def dl_open_pdf(e):
     arxiv_id = e.id.split('/')[-1]
-    title = "".join(c for c in e.title if c.isalnum() or c in (
-        ' ', '-', '_'))[:40].rstrip().replace(' ', '_')
-    filename = f"{arxiv_id}_{title}.pdf"
+    safe_title = re.sub(r'[^\w\s-]', '', e.title)
+    safe_title = re.sub(r'(\s|-)+', '_', safe_title).strip('_')[:40]
+    filepath = Path(f"{arxiv_id}_{safe_title}.pdf")
 
-    if not os.path.exists(filename):
+    if not filepath.exists():
         response = requests.get(
             e.id.replace('/abs/', '/pdf/') + '.pdf', timeout=30)
         response.raise_for_status()
         if not response.content.startswith(b'%PDF'):
             raise ValueError("Downloaded content is not a valid PDF.")
 
-        with open(filename, 'wb') as f:
+        with open(filepath, 'wb') as f:
             f.write(response.content)
 
-        print(f"Downloaded. ", end='')
+        print("Downloaded. ", end='')
 
-    try:
-        subprocess.run(['which', 'mupdf'], check=True, capture_output=True)
-        subprocess.Popen(['mupdf', filename],
-                         stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL)
-        print(f"Opening {filename} ...")
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    if mupdf_path := shutil.which('mupdf'):
+        subprocess.Popen([mupdf_path, filepath],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"Opening {filepath.name} ...")
+    else:
         print("mupdf not found. Please install mupdf or open the file manually.")
-        sys.exit(1)
 
 
 def main():
-    if len(sys.argv) < 2:
-        print(
-            "Usage: python srxiv.py <PDF_PATH> <REFERENCE_NUMBER> [<REFERENCE_PATTERN>] |\n       python srxiv.py <arXiv_ID>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Search for arXiv papers from a PDF reference or an arXiv ID."
+    )
+    parser.add_argument(
+        "id", help="Path to a PDF file or an arXiv ID.")
+    parser.add_argument("refnum", nargs='?', type=int,
+                        help="Reference number in the PDF (e.g., 23).")
+    parser.add_argument("-p", "--pattern", type=int, choices=[
+                        1, 2, 3], help="Force a specific regex pattern for reference parsing.")
+    parser.add_argument("-d", "--depth", type=int, default=1,
+                        help="n-th occurrence backwards.")
 
-    if os.path.isfile(sys.argv[1]):
-        try:
-            if sys.argv[2].isdigit():
-                reftxt = get_reftxt(sys.argv[1], int(sys.argv[2]))
-            else:
-                reftxt = get_reftxt(sys.argv[1], int(sys.argv[2][1:]), 1)
+    args = parser.parse_args()
 
-            if not reftxt:
-                print("Failed to get reference text.")
-                sys.exit(1)
+    if Path(args.id).is_file():
+        if not args.refnum:
+            print("Error: Reference number is required when providing a PDF file.")
+            sys.exit(1)
 
-        except (FileNotFoundError, ValueError) as e:
-            print(f"Error processing input: {e}")
+        reftxt = get_reftxt(args.id, args.refnum, args.depth)
+        if not reftxt:
+            print("Failed to get reference text.")
             sys.exit(1)
     else:
-        reftxt = "arXiv:" + sys.argv[1]
+        reftxt = f"arXiv:{args.id}"
 
     entries = request_arxiv(
-        reftxt, mode=sys.argv[3] if len(sys.argv) > 3 else None)
+        reftxt, mode=args.pattern if args.pattern else None)
+
     if not entries:
         sys.exit(1)
 
