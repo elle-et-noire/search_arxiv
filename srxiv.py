@@ -50,7 +50,7 @@ def request_arxiv(reftxt, max_results=100):
             return feedparser.parse(response.text).entries
         except requests.RequestException as e:
             print(f"Error fetching arXiv ID {arxiv_id}: {e}")
-            pass  # if request with arXiv ID fails, continue to search by authors
+            sys.exit(1)
 
     match = re.compile(
         r"^(?:\[\d+\]\s)?(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
@@ -61,7 +61,7 @@ def request_arxiv(reftxt, max_results=100):
     if not match:
         print("Match failed for the reference text:")
         print(reftxt)
-        return
+        sys.exit(1)
 
     title = match.group("title")
     authors = re.split(r",\s+|\s+and\s+",  match.group("authors"))
@@ -70,7 +70,7 @@ def request_arxiv(reftxt, max_results=100):
     if not query:
         print("No authors found in the reference text:")
         print(reftxt)
-        return
+        sys.exit(1)
 
     try:
         response = requests.get(
@@ -83,7 +83,7 @@ def request_arxiv(reftxt, max_results=100):
         response.raise_for_status()
     except requests.RequestException as e:
         print(f"Error fetching arXiv API: {e}")
-        return
+        sys.exit(1)
 
     feed = feedparser.parse(response.text)
     return list(map(operator.itemgetter(1), sorted([(r, e) for e in feed.entries if (r := fuzz.ratio(e.title, title)) > 50], reverse=True)))
@@ -96,8 +96,8 @@ def print_entry(e, j):
 
 def dl_open_pdf(e):
     arxiv_id = e.id.split('/')[-1]
-    title = "".join(
-        c for c in e.title if c.isalnum() or c in (' ', '-', '_')).rstrip().replace(' ', '_')[:40]
+    title = "".join(c for c in e.title if c.isalnum() or c in (
+        ' ', '-', '_'))[:40].rstrip().replace(' ', '_')
     filename = f"{arxiv_id}_{title}.pdf"
 
     if not os.path.exists(filename):
@@ -105,7 +105,7 @@ def dl_open_pdf(e):
             e.id.replace('/abs/', '/pdf/') + '.pdf', timeout=30)
         response.raise_for_status()
         if not response.content.startswith(b'%PDF'):
-            raise ValueError("Downloaded content is not a valid PDF")
+            raise ValueError("Downloaded content is not a valid PDF.")
 
         with open(filename, 'wb') as f:
             f.write(response.content)
@@ -120,26 +120,30 @@ def dl_open_pdf(e):
         print(f"Opening {filename} ...")
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("mupdf not found. Please install mupdf or open the file manually.")
+        sys.exit(1)
 
 
 def main():
-    if len(sys.argv) < 3:
-        print("Usage: python srxiv.py <PDF_PATH> <REFERENCE_NUMBER>")
+    if len(sys.argv) < 2:
+        print("Usage: python srxiv.py <PDF_PATH> <REFERENCE_NUMBER> |\n       python srxiv.py <arXiv_ID>")
         sys.exit(1)
 
-    try:
-        reftxt = get_reftxt(sys.argv[1], int(sys.argv[2]))
-        if not reftxt:
-            print("Failed to get reference text.")
+    if os.path.isfile(sys.argv[1]):
+        try:
+            reftxt = get_reftxt(sys.argv[1], int(sys.argv[2]))
+            if not reftxt:
+                print("Failed to get reference text.")
+                sys.exit(1)
+
+        except (FileNotFoundError, ValueError) as e:
+            print(f"Error processing input: {e}")
             sys.exit(1)
-
-    except (FileNotFoundError, ValueError) as e:
-        print(f"Error processing input: {e}")
-        sys.exit(1)
+    else:
+        reftxt = "arXiv:" + sys.argv[1]
 
     entries = request_arxiv(reftxt)
     if not entries:
-        return
+        sys.exit(1)
 
     print()
     print_entry(entries[0], 0)
@@ -181,7 +185,7 @@ def main():
             break
         except Exception as e:
             print(f"Error: {e}")
-            break
+            sys.exit(1)
 
 
 if __name__ == "__main__":
