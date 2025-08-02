@@ -14,27 +14,33 @@ def get_reftxt(paper_path, refnum):
         paper_txt = "".join(page.get_text() for page in doc)
 
     lines = paper_txt.splitlines()
-    try:
-        start_idx = next(i for i, line in enumerate(
-            lines) if line.startswith(f"[{refnum}]"))
-    except StopIteration:
-        return ""
+    j = 0
+    while j < len(lines):
+        # deal with cases where the reference number accidentally appears at the head of a line in the main text
+        if lines[j].startswith(f"[{refnum}]") and j > 0 and lines[j-1].strip().endswith("."):
+            break
+        j += 1
+    start_idx = j
     try:
         end_idx = next(i for i, line in enumerate(
-            lines[start_idx+1:], start=start_idx+1) if re.match(r"^\[\d+\]", line))
+            lines[j+1:], start=j+1) if re.match(r"^\[\d+\]", line))
     except StopIteration:
         end_idx = len(lines)
 
     reftxt = ""
     for j in range(start_idx, end_idx):
-        if j + 1 < end_idx and lines[j+1][0].islower():
-            reftxt += re.sub(r"([.,])$", r"\1 ", lines[j].rstrip("-"))
+        # this procedure cannot deal with for example "non-unitary"
+        if lines[j].endswith("-"):
+            if j + 1 < end_idx and lines[j + 1][0].isupper():
+                reftxt += lines[j]  # ex.) non-Hermitian
+            else:
+                reftxt += lines[j].rstrip("-")
         else:
             reftxt += lines[j] + " "
     return reftxt.strip()
 
 
-def request_arxiv(reftxt, max_results=100):
+def request_arxiv(reftxt, max_results=10):
     id_match = re.search(r"ar\s?Xiv:(?P<arxiv_id>[^\s,]+)", reftxt)
     if id_match:
         arxiv_id = id_match.group("arxiv_id")
@@ -53,30 +59,31 @@ def request_arxiv(reftxt, max_results=100):
             sys.exit(1)
 
     match = re.compile(
-        r"^(?:\[\d+\]\s)?(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
-        r"(?P<title>.*),"
-        r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.$)|(?:[^,]+\((?P<year2>\d+)\)[^,]+$)"
+        r"^(?:\[\d+\]\s)?(?P<for_query>.*),\"?\s"
+        # r"^(?:\[\d+\]\s)?(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
+        r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)[^,]+\.)"
     ).match(reftxt)
-
-    # TODO: deal with citation forms without title
-    # if not match:
-    #     match = re.compile(
-    #         r"^(?:\[\d+\]\s)?(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
-    #         r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.$)|(?:[^,]+\((?P<year2>\d+)\)[^,]+$)"
-    #     ).match(reftxt)
-    #     title = ""
+    title = ""
 
     if not match:
-        print("Match failed for the reference text:")
-        print(reftxt)
-        sys.exit(1)
+        match = re.compile(
+            r"^(?:\[\d+\]\s)?(?P<for_query>(?:.+? and .+?)|(?:[^,]+)),\s"
+            r"(?P<title>.*),"
+            r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)|(?:[^,]+\((?P<year2>\d+)\)[^,]+\.)"
+        ).match(reftxt)
 
-    title = match.group("title")
-    authors = re.split(r",\s+|\s+and\s+",  match.group("authors"))
-    query = [author.split(" ")[-1] for author in authors]
+        if not match:
+            print("Match failed for the reference text:")
+            print(reftxt)
+            sys.exit(1)
+        else:
+            title = match.group("title").strip()
+
+    block = re.split(r",\s+|\s+and\s+|\s", match.group("for_query"))
+    query = [b for b in block if b.isalnum()]
 
     if not query:
-        print("No authors found in the reference text:")
+        print("No authors and title words in the reference text:")
         print(reftxt)
         sys.exit(1)
 
@@ -94,6 +101,8 @@ def request_arxiv(reftxt, max_results=100):
         sys.exit(1)
 
     feed = feedparser.parse(response.text)
+    if not title:
+        return feed.entries
     return list(map(operator.itemgetter(1), sorted([(r, e) for e in feed.entries if (r := fuzz.ratio(e.title, title)) > 50], reverse=True)))
 
 
