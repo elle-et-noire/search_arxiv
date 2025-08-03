@@ -29,7 +29,6 @@ def get_reftxt(pdfpath, refnum: int, findnth=1):
         if pnum == -1:
             return ""
 
-        # Only use text up to the page containing the reference
         pdftxt = "".join(
             page.get_text() for page in doc[pnum:pnum + 2]
         )
@@ -37,7 +36,7 @@ def get_reftxt(pdfpath, refnum: int, findnth=1):
     lines = pdftxt.splitlines()
     ini = 0
     while ini < len(lines):
-        # exclude the heading "[refnum]" in the main text
+        # exclude the accidentally heading "[refnum]" in the main text
         if lines[ini].startswith(f"[{refnum}]"):
             break
         ini += 1
@@ -65,21 +64,17 @@ def get_reftxt(pdfpath, refnum: int, findnth=1):
 
 def query_arxiv_api(query, max_results=10):
     """Query the arXiv API with given parameters."""
-    try:
-        response = requests.get(
-            "https://export.arxiv.org/api/query", params={
-                "search_query": query,
-                "start": 0,
-                "max_results": max_results,
-            },
-            timeout=10
-        )
-        print(response.url)  # Debugging: Show the request URL
-        response.raise_for_status()
-        return feedparser.parse(response.text).entries
-    except requests.RequestException as e:
-        print(f"Error fetching data from arXiv: {e}", file=sys.stderr)
-        return None
+    req = requests.Request('GET', "https://export.arxiv.org/api/query", params={
+        "search_query": query,
+        "start": 0,
+        "max_results": max_results,
+    })
+    prepared = req.prepare()
+    print(prepared.url)
+    with requests.Session() as s:
+        response = s.send(prepared, timeout=10)
+    response.raise_for_status()
+    return feedparser.parse(response.text).entries
 
 
 def request_arxiv(reftxt, mode=None, max_results=10):
@@ -147,7 +142,7 @@ def request_arxiv(reftxt, mode=None, max_results=10):
 
 def print_entry(e, j):
     """Print formatted arXiv entry with title and authors."""
-    print(f"[{j+1}]  {e.title}\n")
+    print(f"\n[{j+1}]  {e.title}\n")
     print(f"  by {', '.join(author.name for author in e.authors)} ({e.id})\n")
 
 
@@ -171,9 +166,9 @@ def dl_open_pdf(e):
     if mupdf_path := shutil.which('mupdf'):
         with subprocess.Popen(
             [mupdf_path, filepath],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL):
-            pass  # Process will continue running in background
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        ):
+            pass
         print(f"Opening {filepath.name} ...")
     else:
         print("mupdf not found. Please install mupdf or open the file manually.")
@@ -181,37 +176,37 @@ def dl_open_pdf(e):
 
 def interactive_search(entries):
     """Handle interactive search and download interface."""
-    print()
     print_entry(entries[0], 0)
 
-    disp_count = 1
+    dispnum = 1
+    n = len(entries)
     while True:
         try:
-            if (n := len(entries)) == 1:
+            if n == 1:
                 s = "command (dl [1]st/[q]uit): "
             else:
                 s = f"command ([m]ore/dl [1-{n}]th/[q]uit): "
 
-            user_input = input(s).strip().lower()
+            c = input(s).strip().lower()
 
-            if user_input == 'q':
+            if c == 'q':
                 return
 
-            if len(entries) > 1 and user_input == 'm':
-                if disp_count >= len(entries):
+            if n > 1 and c == 'm':
+                if dispnum >= n:
                     print("No more entries.")
                     continue
-                remnum = min(5, len(entries) - disp_count)
-                for j in range(disp_count, disp_count + remnum):
+                remnum = min(5, n - dispnum)
+                for j in range(dispnum, dispnum + remnum):
                     print_entry(entries[j], j)
-                disp_count += remnum
+                dispnum += remnum
                 continue
 
-            if not user_input.isdigit() or not 0 < int(user_input) <= len(entries):
-                print(f"Invalid input: {user_input}")
+            if not c.isdigit() or not 0 < int(c) <= len(entries):
+                print(f"Invalid input: {c}")
                 continue
 
-            e = entries[int(user_input) - 1]
+            e = entries[int(c) - 1]
             dl_open_pdf(e)
             break
 
