@@ -12,7 +12,7 @@ sudo apt install mupdf  # Recommended PDF viewer
 ## Usage
 
 ```bash
-python srxiv.py <id> [refnum] [-p PATTERN] [-d DEPTH]
+python srxiv.py <id> [refnum] [-p PATTERN] [-d DEPTH] [-i INNER_REFNUM]
 ```
 
 ### Arguments
@@ -21,6 +21,7 @@ python srxiv.py <id> [refnum] [-p PATTERN] [-d DEPTH]
 -   `refnum`: (Optional) The reference number to extract from the PDF. Required if `id` is a PDF file.
 -   `-p, --pattern`: (Optional) Force a specific regex pattern (1-3) for parsing the reference.
 -   `-d, --depth`: (Optional) Find the N-th occurrence of the reference when searching backwards from the end of the PDF. Default is 1.
+-   `-i, --inner-refnum`: (Optional) If a reference block contains multiple citations separated by semicolons, specify which one to use (1-indexed). Default is 1.
 
 ### Modes of Operation
 
@@ -39,24 +40,28 @@ python srxiv.py <id> [refnum] [-p PATTERN] [-d DEPTH]
 # Extract reference [5] from a PDF
 python srxiv.py paper.pdf 5
 
-# Find the 2nd occurrence of reference [5] (e.g., in the reference of the main text where the PDF contains supplementary references)
+# Find the 2nd occurrence of reference [5] (e.g., in main text vs. supplementary)
 python srxiv.py paper.pdf 5 --depth 2
 
-# Force parsing pattern #2 for a reference
+# Extract the 2nd citation from a block like "[5] ...; ...; ..."
+python srxiv.py paper.pdf 5 --inner-refnum 2
+
+# Force parsing pattern #2 for a tricky reference
 python srxiv.py paper.pdf 5 --pattern 2
 
-# Search directly by arXiv ID
+# Search directly by arXiv ID (new and old formats)
 python srxiv.py 1234.56789
+python srxiv.py hep-th/1234567
 ```
 
 ## Reference Parsing Patterns (`-p`)
 
 -   **Pattern 1**: Title is surrounded by quotes.
-    -   `[1] Authors, "The Title.", Journal...`
+    -   `Authors, "The Title," Journal...`
 -   **Pattern 2**: Title is not surrounded by quotes.
-    -   `[2] Authors, The Title, Journal...`
+    -   `Authors, The Title, Journal...`
 -   **Pattern 3**: No title, only authors and journal info.
-    -   `[3] Authors, Journal...`
+    -   `Authors, Journal...`
 
 ## Interactive Commands
 
@@ -67,9 +72,9 @@ python srxiv.py 1234.56789
 ## How It Works
 
 1.  **PDF Parsing**: If a PDF path is given, it searches backwards from the last page to find the page containing the specified reference number (`[N]`). It then extracts the text from that page and the next to ensure the full reference is captured.
-2.  **Reference Matching**: It uses a set of regular expressions to parse the extracted text for authors and title. A specific pattern can be forced with the `--pattern` flag.
+2.  **Reference Matching**: It uses a set of regular expressions to parse the extracted text for authors and title. If the reference block contains multiple citations separated by semicolons (`;`), `--inner-refnum` can be used to select a specific one. A specific parsing pattern can be forced with the `--pattern` flag.
 3.  **arXiv API Query**:
-    -   If an `arXiv:ID` is found in the reference, it queries the API directly with that ID.
+    -   If an `arXiv:ID` (including old formats like `hep-th/...`) is found in the reference, it queries the API directly with that ID.
     -   Otherwise, it constructs a search query using keywords from the parsed authors and title.
 4.  **Results**: Displays the search results and enters an interactive mode for browsing and downloading.
 

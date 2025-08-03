@@ -11,9 +11,6 @@ import fitz
 import feedparser
 import requests
 
-# TODO:
-# - handle in the case where two or more references are given in a single reference, where the references are split by semicolons
-
 
 def get_reftxt(pdfpath, refnum: int, findnth=1):
     """Extract reference text from PDF by searching backwards for [refnum]."""
@@ -63,7 +60,7 @@ def get_reftxt(pdfpath, refnum: int, findnth=1):
         else:
             reftxt += lines[j] + " "
 
-    return reftxt.strip()
+    return re.sub(r"^\[\d+\]", "", reftxt).strip()
 
 
 def query_arxiv_api(query, max_results=10):
@@ -99,21 +96,21 @@ def request_arxiv(reftxt, mode=None, max_results=10):
     refpat = [
         # case1: the title is surrounded by quotes
         re.compile(
-            r"^\[\d+\]\s(?P<authors>.*),\s"
+            r"^(?P<authors>.*),\s"
             r"(“|\")(?P<title>.*),(”|\")\s"
             f"{jnlpat}"
         ),
 
         # case2: the title is not surrounded by quotes
         re.compile(
-            r"^\[\d+\]\s(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
+            r"^(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
             r"(?P<title>.*),\s"
             f"{jnlpat}"
         ),
 
         # case3: no title, just authors and journal
         re.compile(
-            r"^\[\d+\]\s(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
+            r"^(?P<authors>(?:.+? and .+?)|(?:[^,]+)),\s"
             f"{jnlpat}"
         )
     ]
@@ -242,6 +239,9 @@ def main():
     parser.add_argument(
         "-d", "--depth", type=int, default=1,
         help="Backwards search depth for the reference number.")
+    parser.add_argument(
+        "-i", "--inner-refnum", type=int, default=1,
+        help="Specify n-th ref of multiple references.")
 
     args = parser.parse_args()
 
@@ -250,7 +250,8 @@ def main():
             print("Error: Reference number is required when providing a PDF file.")
             sys.exit(1)
 
-        reftxt = get_reftxt(args.id, args.refnum, args.depth)
+        reftxt = get_reftxt(args.id, args.refnum, args.depth).split(";")[
+            args.inner_refnum - 1].strip()
         if not reftxt:
             print("Failed to get reference text.")
             sys.exit(1)
