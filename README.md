@@ -40,13 +40,13 @@ python srxiv.py <id> [refnum] [-p PATTERN] [-d DEPTH] [-i INNER_REFNUM]
 # Extract reference [5] from a PDF
 python srxiv.py paper.pdf 5
 
-# Find the 2nd occurrence of reference [5] (e.g., in main text vs. supplementary)
+# Find the ref [5] in the main references when the PDF contains the references for Supplementary Material
 python srxiv.py paper.pdf 5 --depth 2
 
 # Extract the 2nd citation from a block like "[5] ...; ...; ..."
 python srxiv.py paper.pdf 5 --inner-refnum 2
 
-# Force parsing pattern #2 for a tricky reference
+# Force parsing pattern #2 for a reference
 python srxiv.py paper.pdf 5 --pattern 2
 
 # Search directly by arXiv ID (new and old formats)
@@ -62,6 +62,8 @@ python srxiv.py hep-th/1234567
     -   `Authors, The Title, Journal...`
 -   **Pattern 3**: No title, only authors and journal info.
     -   `Authors, Journal...`
+
+Patterns 2 and 3 assume that for multiple authors, the word "and" is used between the last two authors. However, this is not always the case. For a counterexample, see reference \[10\] in [hep-th/9802150](https://arxiv.org/abs/hep-th/9802150) (the `srxiv.py` works in this case because it can use the pattern 1).
 
 ## Interactive Commands
 
