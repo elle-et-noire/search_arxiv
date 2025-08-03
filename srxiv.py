@@ -11,6 +11,9 @@ import fitz
 import feedparser
 import requests
 
+# TODO:
+# - handle in the case where two or more references are given in a single reference, where the references are split by semicolons
+
 
 def get_reftxt(pdfpath, refnum: int, findnth=1):
     """Extract reference text from PDF by searching backwards for [refnum]."""
@@ -19,10 +22,11 @@ def get_reftxt(pdfpath, refnum: int, findnth=1):
         count = 0
         pnum = -1
         for j in range(len(doc) - 1, -1, -1):
-            if re.search(rf"(^|\.\n)\[{refnum}\]", doc[j].get_text()):
+            if (refnum > 1 and re.search(rf"(^|\.\n)\[{refnum}\]", doc[j].get_text())) or \
+               (refnum == 1 and re.search(rf"\n\[{refnum}\]", doc[j].get_text())):
                 pnum = j
                 count += 1
-                if count >= findnth:  # max appearance is main ref and SM ref
+                if count >= findnth:
                     break
 
         if pnum == -1:
@@ -37,8 +41,7 @@ def get_reftxt(pdfpath, refnum: int, findnth=1):
     ini = 0
     while ini < len(lines):
         # exclude the heading "[refnum]" in the main text
-        if lines[ini].startswith(f"[{refnum}]") and \
-                ini > 0 and lines[ini-1].strip().endswith("."):
+        if lines[ini].startswith(f"[{refnum}]"):
             break
         ini += 1
     try:
@@ -84,12 +87,14 @@ def query_arxiv_api(query, max_results=10):
 
 def request_arxiv(reftxt, mode=None, max_results=10):
     """Search arXiv API using reference text or arXiv ID."""
-    id_match = re.search(r"ar\s?Xiv:(?P<arxiv_id>[^\s,]+)", reftxt)
+    id_match = re.search(r"ar\s?Xiv:(?P<arxiv_id>[^\s,]+)", reftxt) or \
+        re.search(r"(?P<arxiv_id>hep-th/\d{7,})", reftxt)
+
     if id_match:
         return query_arxiv_api(id_match.group("arxiv_id"), max_results)
 
-    jnlpat = (r"(?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)"
-              r"|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.)")
+    jnlpat = (r"((?:[^,]+,[^,]+\((?P<year1>\d+)\)\.)"
+              r"|(?:[^,]+\((?P<year2>\d+)\)\s\d+\.))")
 
     refpat = [
         # case1: the title is surrounded by quotes
