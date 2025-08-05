@@ -30,21 +30,20 @@ def get_reftxt(pdfpath, refnum: int, findnth=1):
             return ""
 
         pdftxt = "".join(
-            page.get_text() for page in doc[pnum:pnum + 2]
-        )
+            page.get_text() for page in doc[pnum:pnum + 2])
 
     lines = pdftxt.splitlines()
-    ini = 0
-    while ini < len(lines):
-        # exclude the accidentally heading "[refnum]" in the main text
-        if lines[ini].startswith(f"[{refnum}]"):
-            break
-        ini += 1
+    try:
+        ini = next(
+            i for i, line in enumerate(lines)
+            if line.startswith(f"[{refnum}]"))
+    except StopIteration:
+        return ""
+
     try:
         fin = next(
             i for i, line in enumerate(lines[ini+1:], start=ini+1)
-            if re.match(r"^\[\d+\]", line)
-        )
+            if re.match(r"^\[\d+\]", line))
     except StopIteration:
         fin = len(lines)
 
@@ -79,7 +78,7 @@ def query_arxiv_api(query, max_results=10):
 
 def request_arxiv(reftxt, mode=None, max_results=10):
     """Search arXiv API using reference text or arXiv ID."""
-    id_match = re.search(r"ar\s?Xiv:(?P<arxiv_id>[^\s,]+)", reftxt) or \
+    id_match = re.search(r"ar-?Xiv:(?P<arxiv_id>[^\s,]+)", reftxt) or \
         re.search(r"(?P<arxiv_id>hep-th/\d{7,})", reftxt)
 
     if id_match:
@@ -164,11 +163,10 @@ def dl_open_pdf(e):
         print("Downloaded. ", end='')
 
     if mupdf_path := shutil.which('mupdf'):
-        with subprocess.Popen(
+        subprocess.Popen(
             [mupdf_path, filepath],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        ):
-            pass
+        )
         print(f"Opening {filepath.name} ...")
     else:
         print("mupdf not found. Please install mupdf or open the file manually.")
@@ -208,7 +206,7 @@ def interactive_search(entries):
 
             e = entries[int(c) - 1]
             dl_open_pdf(e)
-            break
+            return  # Exit after opening PDF
 
         except KeyboardInterrupt:
             print("\n\nInterrupted by user. Exiting...")
